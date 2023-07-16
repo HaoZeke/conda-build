@@ -108,7 +108,7 @@ def stats_key(metadata, desc):
     used_loop_vars = metadata.get_used_loop_vars()
     build_vars = "-".join(
         [
-            k + "_" + str(metadata.config.variant[k])
+            f"{k}_{str(metadata.config.variant[k])}"
             for k in used_loop_vars
             if k != "target_platform"
         ]
@@ -117,13 +117,12 @@ def stats_key(metadata, desc):
     #    explicitly listed in the recipe.
     tp = metadata.config.variant.get("target_platform")
     if tp and tp != metadata.config.subdir and "target_platform" not in build_vars:
-        build_vars += "-target_" + tp
+        build_vars += f"-target_{tp}"
     key = [metadata.name(), metadata.version()]
     if build_vars:
         key.append(build_vars)
     key = "-".join(key)
-    key = desc + key
-    return key
+    return desc + key
 
 
 def log_stats(stats_dict, descriptor):
@@ -167,9 +166,9 @@ def create_post_scripts(m):
             if m.meta.get("build", {}).get(tp, ""):
                 scriptname = m.meta["build"][tp]
             else:
-                scriptname = m.name() + "-" + tp
+                scriptname = f"{m.name()}-{tp}"
         scriptname += ext
-        dst_name = "." + m.name() + "-" + tp + ext
+        dst_name = f".{m.name()}-{tp}{ext}"
         src = join(m.path, scriptname)
         if isfile(src):
             dst_dir = join(
@@ -186,11 +185,7 @@ def create_post_scripts(m):
 def prefix_replacement_excluded(path):
     if path.endswith((".pyc", ".pyo")) or not isfile(path):
         return True
-    if sys.platform != "darwin" and islink(path):
-        # OSX does not allow hard-linking symbolic links, so we cannot
-        # skip symbolic links (as we can on Linux)
-        return True
-    return False
+    return bool(sys.platform != "darwin" and islink(path))
 
 
 def have_prefix_files(files, prefix):
@@ -215,15 +210,14 @@ def have_prefix_files(files, prefix):
         double_backslash_prefix_bytes = double_backslash_prefix.encode(utils.codec)
         searches[double_backslash_prefix] = double_backslash_prefix_bytes
     searches[prefix_placeholder] = prefix_placeholder_bytes
-    min_prefix = min(len(k) for k, _ in searches.items())
+    min_prefix = min(len(k) for k in searches)
 
     # mm.find is incredibly slow, so ripgrep is used to pre-filter the list.
     # Really, ripgrep could be used on its own with a bit more work though.
     rg_matches = []
     prefix_len = len(prefix) + 1
-    rg = external.find_executable("rg")
-    if rg:
-        for rep_prefix, _ in searches.items():
+    if rg := external.find_executable("rg"):
+        for rep_prefix in searches:
             try:
                 args = [
                     rg,
@@ -274,7 +268,7 @@ def have_prefix_files(files, prefix):
             fi = open(path, "rb+")
         except OSError:
             log = utils.get_logger(__name__)
-            log.warn("failed to open %s for detecting prefix.  Skipping it." % f)
+            log.warn(f"failed to open {f} for detecting prefix.  Skipping it.")
             continue
         try:
             mm = utils.mmap_mmap(
@@ -285,7 +279,6 @@ def have_prefix_files(files, prefix):
 
         mode = "binary" if mm.find(b"\x00") != -1 else "text"
         if mode == "text":
-            # TODO :: Ask why we do not do this on Windows too?!
             if not utils.on_win and mm.find(prefix_bytes) != -1:
                 # Use the placeholder for maximal backwards compatibility, and
                 # to minimize the occurrences of usernames appearing in built
@@ -328,9 +321,7 @@ def chunks(line, n):
 
 
 def get_bytes_or_text_as_bytes(parent):
-    if "bytes" in parent:
-        return parent["bytes"]
-    return parent["text"].encode("utf-8")
+    return parent["bytes"] if "bytes" in parent else parent["text"].encode("utf-8")
 
 
 def regex_files_rg(
@@ -400,9 +391,16 @@ def regex_files_rg(
                             "binary" if data.find(b"\x00") != -1 else "text"
                         )
                     assert match_filename_type != "unknown"
+                elif new_stage == "elpased_total":
+                    assert stage == "end"
+                    stage = new_stage
+                    print("ELAPSED TOTAL")
+                elif new_stage == "end":
+                    assert stage == "match"
+                    stage = new_stage
                 elif new_stage == "match":
                     old_stage = stage
-                    assert stage == "begin" or stage == "match" or stage == "end"
+                    assert stage in ["begin", "match", "end"]
                     stage = new_stage
                     match_filename = match["data"]["path"]["text"][
                         len(prefix) + 1 :
@@ -416,18 +414,12 @@ def regex_files_rg(
                             match_filename_begin == match_filename
                         ), f"{match_filename_begin} != \n {match_filename}"
                     if match_filename not in match_records:
-                        if debug_this:
-                            # We could add: #'line': match_line, 'line_number': match_line_number but it would
-                            # break our ability to compare against the python code.
-                            match_records[match_filename] = {
-                                "type": match_filename_type,
-                                "submatches": [],
-                            }
-                        else:
-                            match_records[match_filename] = {
-                                "type": match_filename_type,
-                                "submatches": [],
-                            }
+                        # We could add: #'line': match_line, 'line_number': match_line_number but it would
+                        # break our ability to compare against the python code.
+                        match_records[match_filename] = {
+                            "type": match_filename_type,
+                            "submatches": [],
+                        }
                     for submatch in match["data"]["submatches"]:
                         submatch_match_text = get_bytes_or_text_as_bytes(
                             submatch["match"]
@@ -456,13 +448,6 @@ def regex_files_rg(
                             match_records[match_filename]["submatches"].append(
                                 submatch_record
                             )
-                elif new_stage == "end":
-                    assert stage == "match"
-                    stage = new_stage
-                elif new_stage == "elpased_total":
-                    assert stage == "end"
-                    stage = new_stage
-                    print("ELAPSED TOTAL")
     return sort_matches(match_records)
 
 
@@ -540,11 +525,9 @@ def regex_matches_tighten_re(match_records, regex_re, tag=None):
             for submatch in match["submatches"]:
                 if tag and submatch["tag"] != tag:
                     continue
-                match_re = re.match(re_re, submatch["text"])
-                if match_re:
-                    groups = match_re.groups()
-                    if groups:
-                        match_tigher = match_re.group(len(groups))
+                if match_re := re.match(re_re, submatch["text"]):
+                    if groups := match_re.groups():
+                        match_tigher = match_re[len(groups)]
                     else:
                         match_tigher = str(match_re)
                     if match_tigher != submatch["text"]:
@@ -599,15 +582,9 @@ def check_matches(prefix, match_records):
             for submatch in match["submatches"]:
                 file_content = data[submatch["start"] : submatch["end"]]
                 if file_content != submatch["text"]:
-                    print(
-                        "ERROR :: file_content {} != submatch {}".format(
-                            file_content, submatch["text"]
-                        )
-                    )
+                    print(f'ERROR :: file_content {file_content} != submatch {submatch["text"]}')
                 print(
-                    "{} :: ({}..{}) = {}".format(
-                        file, submatch["start"], submatch["end"], submatch["text"]
-                    )
+                    f'{file} :: ({submatch["start"]}..{submatch["end"]}) = {submatch["text"]}'
                 )
 
 
@@ -673,24 +650,24 @@ def have_regex_files(
             also_binaries=also_binaries,
             match_records=match_records_re,
         )
-        if debug:
-            check_matches(prefix, match_records_rg)
-            check_matches(prefix, match_records_re)
-            if match_records_rg != match_records_re:
-                for (k, v), (k2, v2) in zip(
-                    match_records_rg.items(), match_records_re.items()
-                ):
-                    if k != k2:
-                        print(f"File Mismatch:\n{k}\n{k2}")
-                    elif v != v2:
-                        print(f"Match Mismatch ({v}):\n{v2}\n{k}")
-                        for submatch, submatch2 in zip(
-                            v["submatches"], v2["submatches"]
-                        ):
-                            if submatch != submatch2:
-                                print(
-                                    f"Submatch Mismatch ({submatch}):\n{submatch2}\n{k}"
-                                )
+    if debug:
+        check_matches(prefix, match_records_rg)
+        check_matches(prefix, match_records_re)
+        if match_records_rg != match_records_re:
+            for (k, v), (k2, v2) in zip(
+                match_records_rg.items(), match_records_re.items()
+            ):
+                if k != k2:
+                    print(f"File Mismatch:\n{k}\n{k2}")
+                elif v != v2:
+                    print(f"Match Mismatch ({v}):\n{v2}\n{k}")
+                    for submatch, submatch2 in zip(
+                        v["submatches"], v2["submatches"]
+                    ):
+                        if submatch != submatch2:
+                            print(
+                                f"Submatch Mismatch ({submatch}):\n{submatch2}\n{k}"
+                            )
     return match_records_rg if rg else match_records_re
 
 
@@ -709,17 +686,13 @@ def rewrite_file_with_new_prefix(path, data, old_prefix, new_prefix):
 def perform_replacements(matches, prefix, verbose=False, diff=None):
     for file, match in matches.items():
         filename = os.path.join(prefix, file)
-        filename_tmp = filename + ".cbpatch.tmp"
+        filename_tmp = f"{filename}.cbpatch.tmp"
         if os.path.exists(filename_tmp):
             os.unlink()
         shutil.copy2(filename, filename_tmp)
         filename_short = filename.replace(prefix + os.sep, "")
         print(
-            "Patching '{}' in {} {}".format(
-                filename_short,
-                len(match["submatches"]),
-                "places" if len(match["submatches"]) > 1 else "place",
-            )
+            f"""Patching '{filename_short}' in {len(match["submatches"])} {"places" if len(match["submatches"]) > 1 else "place"}"""
         )
         with open(filename_tmp, "wb+") as file_tmp:
             file_tmp.truncate()
@@ -745,9 +718,7 @@ def perform_replacements(matches, prefix, verbose=False, diff=None):
                     if match["type"] == "binary":
                         if len(original) < len(new_string):
                             print(
-                                "ERROR :: Cannot replace {} with {} in binary file {}".format(
-                                    original, new_string, filename
-                                )
+                                f"ERROR :: Cannot replace {original} with {new_string} in binary file {filename}"
                             )
                         new_string = new_string.ljust(len(original), b"\0")
                         assert len(new_string) == len(original)
@@ -794,7 +765,7 @@ def _copy_top_level_recipe(path, config, dest_dir, destination_subdir=None):
         file_paths = [
             f
             for f in file_paths
-            if not (f == "meta.yaml" or f == "conda_build_config.yaml")
+            if f not in ["meta.yaml", "conda_build_config.yaml"]
         ]
     file_paths = utils.filter_files(file_paths, path)
     for f in file_paths:
@@ -828,73 +799,73 @@ def _copy_output_recipe(m, dest_dir):
 
 
 def copy_recipe(m):
-    if m.config.include_recipe and m.include_recipe():
-        # store the rendered meta.yaml file, plus information about where it came from
-        #    and what version of conda-build created it
-        recipe_dir = join(m.config.info_dir, "recipe")
-        try:
-            os.makedirs(recipe_dir)
-        except:
-            pass
+    if not m.config.include_recipe or not m.include_recipe():
+        return
+    # store the rendered meta.yaml file, plus information about where it came from
+    #    and what version of conda-build created it
+    recipe_dir = join(m.config.info_dir, "recipe")
+    try:
+        os.makedirs(recipe_dir)
+    except:
+        pass
 
-        original_recipe = ""
+    original_recipe = ""
 
-        if m.is_output:
-            _copy_output_recipe(m, recipe_dir)
-        else:
-            _copy_top_level_recipe(m.path, m.config, recipe_dir)
-            original_recipe = m.meta_path
+    if m.is_output:
+        _copy_output_recipe(m, recipe_dir)
+    else:
+        _copy_top_level_recipe(m.path, m.config, recipe_dir)
+        original_recipe = m.meta_path
 
-        output_metadata = m.copy()
-        # hard code the build string, so that tests don't get it mixed up
-        build = output_metadata.meta.get("build", {})
-        build["string"] = output_metadata.build_id()
-        output_metadata.meta["build"] = build
+    output_metadata = m.copy()
+    # hard code the build string, so that tests don't get it mixed up
+    build = output_metadata.meta.get("build", {})
+    build["string"] = output_metadata.build_id()
+    output_metadata.meta["build"] = build
 
-        # just for lack of confusion, don't show outputs in final rendered recipes
-        if "outputs" in output_metadata.meta:
-            del output_metadata.meta["outputs"]
-        if "parent_recipe" in output_metadata.meta.get("extra", {}):
-            del output_metadata.meta["extra"]["parent_recipe"]
+    # just for lack of confusion, don't show outputs in final rendered recipes
+    if "outputs" in output_metadata.meta:
+        del output_metadata.meta["outputs"]
+    if "parent_recipe" in output_metadata.meta.get("extra", {}):
+        del output_metadata.meta["extra"]["parent_recipe"]
 
-        utils.sort_list_in_nested_structure(
-            output_metadata.meta, ("build/script", "test/commands")
-        )
+    utils.sort_list_in_nested_structure(
+        output_metadata.meta, ("build/script", "test/commands")
+    )
 
-        rendered = output_yaml(output_metadata)
+    rendered = output_yaml(output_metadata)
 
-        if original_recipe:
-            with open(original_recipe, "rb") as f:
-                original_recipe_text = UnicodeDammit(f.read()).unicode_markup
+    if original_recipe:
+        with open(original_recipe, "rb") as f:
+            original_recipe_text = UnicodeDammit(f.read()).unicode_markup
 
-        if not original_recipe or not original_recipe_text == rendered:
-            with open(join(recipe_dir, "meta.yaml"), "w") as f:
-                f.write(f"# This file created by conda-build {conda_build_version}\n")
-                if original_recipe:
-                    f.write("# meta.yaml template originally from:\n")
-                    f.write("# " + source.get_repository_info(m.path) + "\n")
-                f.write("# ------------------------------------------------\n\n")
-                f.write(rendered)
+    if not original_recipe or original_recipe_text != rendered:
+        with open(join(recipe_dir, "meta.yaml"), "w") as f:
+            f.write(f"# This file created by conda-build {conda_build_version}\n")
             if original_recipe:
-                utils.copy_into(
-                    original_recipe,
-                    os.path.join(recipe_dir, "meta.yaml.template"),
-                    timeout=m.config.timeout,
-                    locking=m.config.locking,
-                    clobber=True,
-                )
+                f.write("# meta.yaml template originally from:\n")
+                f.write(f"# {source.get_repository_info(m.path)}" + "\n")
+            f.write("# ------------------------------------------------\n\n")
+            f.write(rendered)
+        if original_recipe:
+            utils.copy_into(
+                original_recipe,
+                os.path.join(recipe_dir, "meta.yaml.template"),
+                timeout=m.config.timeout,
+                locking=m.config.locking,
+                clobber=True,
+            )
 
-        # dump the full variant in use for this package to the recipe folder
-        with open(os.path.join(recipe_dir, "conda_build_config.yaml"), "w") as f:
-            yaml.dump(m.config.variant, f)
+    # dump the full variant in use for this package to the recipe folder
+    with open(os.path.join(recipe_dir, "conda_build_config.yaml"), "w") as f:
+        yaml.dump(m.config.variant, f)
 
 
 def copy_readme(m):
-    readme = m.get_value("about/readme")
-    if readme:
+    if readme := m.get_value("about/readme"):
         src = join(m.config.work_dir, readme)
         if not isfile(src):
-            sys.exit("Error: no readme file: %s" % readme)
+            sys.exit(f"Error: no readme file: {readme}")
         dst = join(m.config.info_dir, readme)
         utils.copy_into(src, dst, m.config.timeout, locking=m.config.locking)
         if os.path.split(readme)[1] not in {"README.md", "README.rst", "README"}:
@@ -907,30 +878,28 @@ def copy_readme(m):
 
 def jsonify_info_yamls(m):
     iyd = "info_yaml.d"
-    ijd = "info_json.d"
     src = join(dirname(m.meta_path), iyd)
     res = []
     if os.path.exists(src) and isdir(src):
+        ijd = "info_json.d"
         for root, dirs, files in os.walk(src):
             for file in files:
                 file = join(root, file)
                 bn, ext = os.path.splitext(os.path.basename(file))
                 if ext == ".yaml":
-                    dst = join(m.config.info_dir, ijd, bn + ".json")
+                    dst = join(m.config.info_dir, ijd, f"{bn}.json")
                     try:
                         os.makedirs(os.path.dirname(dst))
                     except:
                         pass
-                    with open(file) as i, open(dst, "w") as o:
+                    with (open(file) as i, open(dst, "w") as o):
                         import yaml
 
                         yaml = yaml.full_load(i)
                         json.dump(
                             yaml, o, sort_keys=True, indent=2, separators=(",", ": ")
                         )
-                        res.append(
-                            join(os.path.basename(m.config.info_dir), ijd, bn + ".json")
-                        )
+                        res.append(join(os.path.basename(m.config.info_dir), ijd, f"{bn}.json"))
     return res
 
 
@@ -962,27 +931,24 @@ def generic_copy(m, name, field):
                 f" to include the folder and all of its content as {name} "
                 "information."
             )
-        if os.path.isfile(src_file) or os.path.isdir(src_file):
-            # Rename absolute file paths or relative file paths starting with .. or .
-            if os.path.isabs(single_file) or single_file.startswith("."):
-                filename = "{}{}{}".format(
-                    name.upper(), count, ".txt" if os.path.isfile(src_file) else ""
-                )
-                count += 1
-            else:
-                filename = single_file
-            utils.copy_into(
-                src_file,
-                join(m.config.info_dir, f"{name}s", filename),
-                m.config.timeout,
-                locking=m.config.locking,
-            )
-        else:
+        if not os.path.isfile(src_file) and not os.path.isdir(src_file):
             raise ValueError(
                 f"{name.capitalize()} file given in about/{field}"
                 f" ({src_file}) does not exist in source root dir or in recipe"
                 " root dir (with meta.yaml)"
             )
+            # Rename absolute file paths or relative file paths starting with .. or .
+        if os.path.isabs(single_file) or single_file.startswith("."):
+            filename = f'{name.upper()}{count}{".txt" if os.path.isfile(src_file) else ""}'
+            count += 1
+        else:
+            filename = single_file
+        utils.copy_into(
+            src_file,
+            join(m.config.info_dir, f"{name}s", filename),
+            m.config.timeout,
+            locking=m.config.locking,
+        )
     print(f"Packaged {name} file/s.")
 
 
@@ -1039,17 +1005,12 @@ def copy_test_source_files(m, destination):
                         )
                     except OSError as e:
                         log = utils.get_logger(__name__)
-                        log.warn(
-                            "Failed to copy {} into test files.  Error was: {}".format(
-                                f, str(e)
-                            )
-                        )
+                        log.warn(f"Failed to copy {f} into test files.  Error was: {str(e)}")
                 for ext in ".pyc", ".pyo":
                     for f in utils.get_ext_files(destination, ext):
                         os.remove(f)
 
-    recipe_test_files = m.get_value("test/files")
-    if recipe_test_files:
+    if recipe_test_files := m.get_value("test/files"):
         orig_recipe_dir = m.path
         for pattern in recipe_test_files:
             files = glob(join(orig_recipe_dir, pattern))
@@ -1125,7 +1086,7 @@ def get_files_with_prefix(m, replacements, files_in, prefix):
             ignore_types.update((FileMode.text.name, FileMode.binary.name))
         ignore_files = []
     if not m.get_value(
-        "build/detect_binary_files_with_prefix", True if not utils.on_win else False
+        "build/detect_binary_files_with_prefix", not utils.on_win
     ) and not m.get_value("build/binary_has_prefix_files", None):
         ignore_types.update((FileMode.binary.name,))
     files_with_prefix = [
@@ -1182,17 +1143,18 @@ def get_files_with_prefix(m, replacements, files_in, prefix):
         match_records={},
         debug=m.config.debug,
     )
-    prefixes_for_file = {}
-    # This is for Windows mainly, though we may want to allow multiple searches at once in a file on
-    # all OSes some-day. It  is harmless to do this on all systems anyway.
-    for filename, match in pfx_matches.items():
-        prefixes_for_file[filename] = {sm["text"] for sm in match["submatches"]}
+    prefixes_for_file = {
+        filename: {sm["text"] for sm in match["submatches"]}
+        for filename, match in pfx_matches.items()
+    }
     files_with_prefix_new = []
     for _, mode, filename in files_with_prefix:
         np = filename
         if np in prefixes_for_file and np in pfx_matches:
-            for pfx in prefixes_for_file[np]:
-                files_with_prefix_new.append((pfx.decode("utf-8"), mode, filename))
+            files_with_prefix_new.extend(
+                (pfx.decode("utf-8"), mode, np)
+                for pfx in prefixes_for_file[np]
+            )
     files_with_prefix = files_with_prefix_new
     all_matches = {}
 
@@ -1219,8 +1181,7 @@ def get_files_with_prefix(m, replacements, files_in, prefix):
                 debug=m.config.debug,
             )
             replacement_tags = (
-                replacement_tags
-                + '"'
+                f'{replacement_tags}"'
                 + replacement["tag"]
                 + ('"' if index == last else '", ')
             )
@@ -1274,50 +1235,36 @@ def record_prefix_files(m, files_with_prefix):
     # Copies are made to ease debugging. Sorry.
     binary_has_prefix_files = m.binary_has_prefix_files()[:]
     text_has_prefix_files = m.has_prefix_files()[:]
-    # We need to cache these as otherwise the fact we remove from this in a for loop later
-    # that also checks it has elements.
-    len_binary_has_prefix_files = len(binary_has_prefix_files)
-    len_text_has_prefix_files = len(text_has_prefix_files)
-
     if files_with_prefix:
-        if utils.on_win:
-            # Paths on Windows can contain spaces, so we need to quote the
-            # paths. Fortunately they can't contain quotes, so we don't have
-            # to worry about nested quotes.
-            fmt_str = '"%s" %s "%s"\n'
-        else:
-            # Don't do it everywhere because paths on Unix can contain quotes,
-            # and we don't have a good method of escaping, and because older
-            # versions of conda don't support quotes in has_prefix
-            fmt_str = "%s %s %s\n"
-
+        fmt_str = '"%s" %s "%s"\n' if utils.on_win else "%s %s %s\n"
         print("Files containing CONDA_PREFIX")
         print("-----------------------------")
+        # We need to cache these as otherwise the fact we remove from this in a for loop later
+        # that also checks it has elements.
+        len_binary_has_prefix_files = len(binary_has_prefix_files)
         detect_binary_files_with_prefix = m.get_value(
             "build/detect_binary_files_with_prefix",
             not len_binary_has_prefix_files and not utils.on_win,
         )
+        len_text_has_prefix_files = len(text_has_prefix_files)
+
         with open(join(m.config.info_dir, "has_prefix"), "w") as fo:
             for pfix, mode, fn in files_with_prefix:
                 ignored_because = None
-                if fn in binary_has_prefix_files or (
+                if fn in binary_has_prefix_files:
+                    if mode != "binary":
+                        mode = "binary"
+                    elif detect_binary_files_with_prefix:
+                        print(
+                            f"File {fn} force-identified as 'binary', But it is 'binary' anyway, suggest removing it from `build/binary_has_prefix_files`"
+                        )
+                    if fn in binary_has_prefix_files:
+                        binary_has_prefix_files.remove(fn)
+                elif (
                     (not len_binary_has_prefix_files or detect_binary_files_with_prefix)
                     and mode == "binary"
                 ):
-                    if fn in binary_has_prefix_files:
-                        if mode != "binary":
-                            mode = "binary"
-                        elif (
-                            fn in binary_has_prefix_files
-                            and detect_binary_files_with_prefix
-                        ):
-                            print(
-                                "File {} force-identified as 'binary', "
-                                "But it is 'binary' anyway, suggest removing it from "
-                                "`build/binary_has_prefix_files`".format(fn)
-                            )
-                    if fn in binary_has_prefix_files:
-                        binary_has_prefix_files.remove(fn)
+                    pass
                 elif (
                     fn in text_has_prefix_files
                     or (not len_text_has_prefix_files and mode == "text")
@@ -1327,14 +1274,12 @@ def record_prefix_files(m, files_with_prefix):
                         mode = "text"
                     elif fn in text_has_prefix_files and not len_text_has_prefix_files:
                         print(
-                            "File {} force-identified as 'text', "
-                            "But it is 'text' anyway, suggest removing it from "
-                            "`build/has_prefix_files`".format(fn)
+                            f"File {fn} force-identified as 'text', But it is 'text' anyway, suggest removing it from `build/has_prefix_files`"
                         )
                     if fn in text_has_prefix_files:
                         text_has_prefix_files.remove(fn)
                 else:
-                    ignored_because = " (not in build/%s_has_prefix_files)" % (mode)
+                    ignored_because = f" (not in build/{mode}_has_prefix_files)"
 
                 print(
                     "{fn} ({mode}): {action}{reason}".format(
@@ -1348,10 +1293,10 @@ def record_prefix_files(m, files_with_prefix):
                     fo.write(fmt_str % (pfix, mode, fn))
                     filtered.append((pfix, mode, fn))
 
-    # make sure we found all of the files expected
-    errstr = ""
-    for f in text_has_prefix_files:
-        errstr += "Did not detect hard-coded path in %s from has_prefix_files\n" % f
+    errstr = "".join(
+        "Did not detect hard-coded path in %s from has_prefix_files\n" % f
+        for f in text_has_prefix_files
+    )
     for f in binary_has_prefix_files:
         errstr += (
             "Did not detect hard-coded path in %s from binary_has_prefix_files\n" % f
@@ -1372,8 +1317,8 @@ def write_info_files_file(m, files):
 
     mode_dict = {"mode": "w", "encoding": "utf-8"}
     with open(join(m.config.info_dir, "files"), **mode_dict) as fo:
-        if m.noarch == "python":
-            for f in sorted(files):
+        for f in sorted(files):
+            if m.noarch == "python":
                 if f.find("site-packages") >= 0:
                     fo.write(f[f.find("site-packages") :] + "\n")
                 elif f.startswith("bin") and (f not in entry_point_script_names):
@@ -1382,28 +1327,25 @@ def write_info_files_file(m, files):
                     fo.write(f.replace("Scripts", "python-scripts") + "\n")
                 else:
                     fo.write(f + "\n")
-        else:
-            for f in sorted(files):
+            else:
                 fo.write(f + "\n")
 
 
 def write_link_json(m):
     package_metadata = OrderedDict()
-    noarch_type = m.get_value("build/noarch")
-    if noarch_type:
+    if noarch_type := m.get_value("build/noarch"):
         noarch_type_str = str(noarch_type)
         noarch_dict = OrderedDict(type=noarch_type_str)
         if noarch_type_str.lower() == "python":
-            entry_points = m.get_value("build/entry_points")
-            if entry_points:
+            if entry_points := m.get_value("build/entry_points"):
                 noarch_dict["entry_points"] = entry_points
         package_metadata["noarch"] = noarch_dict
 
-    preferred_env = m.get_value("build/preferred_env")
-    if preferred_env:
+    if preferred_env := m.get_value("build/preferred_env"):
         preferred_env_dict = OrderedDict(name=str(preferred_env))
-        executable_paths = m.get_value("build/preferred_env_executable_paths")
-        if executable_paths:
+        if executable_paths := m.get_value(
+            "build/preferred_env_executable_paths"
+        ):
             preferred_env_dict["executable_paths"] = executable_paths
         package_metadata["preferred_env"] = preferred_env_dict
     if package_metadata:
@@ -1423,7 +1365,7 @@ def write_about_json(m):
     with open(join(m.config.info_dir, "about.json"), "w") as fo:
         d = {}
         for key, default in FIELDS["about"].items():
-            value = m.get_value("about/%s" % key)
+            value = m.get_value(f"about/{key}")
             if value:
                 d[key] = value
             if default is list:
@@ -1432,11 +1374,10 @@ def write_about_json(m):
         # for sake of reproducibility, record some conda info
         d["conda_version"] = conda_version
         d["conda_build_version"] = conda_build_version
-        # conda env will be in most, but not necessarily all installations.
-        #    Don't die if we don't see it.
-        stripped_channels = []
-        for channel in get_rc_urls() + list(m.config.channel_urls):
-            stripped_channels.append(sanitize_channel(channel))
+        stripped_channels = [
+            sanitize_channel(channel)
+            for channel in get_rc_urls() + list(m.config.channel_urls)
+        ]
         d["channels"] = stripped_channels
         evars = ["CIO_TEST"]
 
@@ -1469,15 +1410,7 @@ def write_info_json(m):
             runtime_deps = environ.get_pinned_deps(m, "run")
         with open(join(m.config.info_dir, "requires"), "w") as fo:
             fo.write(
-                "# This file as created when building:\n"
-                "#\n"
-                "#     {}.tar.bz2  (on '{}')\n"
-                "#\n"
-                "# It can be used to create the runtime environment of this package using:\n"
-                "# $ conda create --name <env> --file <this file>".format(
-                    m.dist(),
-                    m.config.build_subdir,
-                )
+                f"# This file as created when building:\n#\n#     {m.dist()}.tar.bz2  (on '{m.config.build_subdir}')\n#\n# It can be used to create the runtime environment of this package using:\n# $ conda create --name <env> --file <this file>"
             )
             for dist in sorted(runtime_deps + [" ".join(m.dist().rsplit("-", 2))]):
                 fo.write("%s\n" % "=".join(dist.split()))
@@ -1488,8 +1421,7 @@ def write_info_json(m):
 
 
 def write_no_link(m, files):
-    no_link = m.get_value("build/no_link")
-    if no_link:
+    if no_link := m.get_value("build/no_link"):
         if not isinstance(no_link, list):
             no_link = [no_link]
         with open(join(m.config.info_dir, "no_link"), "w") as fo:
@@ -1503,16 +1435,14 @@ def get_entry_point_script_names(entry_point_scripts):
     for entry_point in entry_point_scripts:
         cmd = entry_point[: entry_point.find("=")].strip()
         if utils.on_win:
-            scripts.append("Scripts\\%s-script.py" % cmd)
-            scripts.append("Scripts\\%s.exe" % cmd)
+            scripts.extend(("Scripts\\%s-script.py" % cmd, "Scripts\\%s.exe" % cmd))
         else:
-            scripts.append("bin/%s" % cmd)
+            scripts.append(f"bin/{cmd}")
     return scripts
 
 
 def write_run_exports(m):
-    run_exports = m.meta.get("build", {}).get("run_exports", {})
-    if run_exports:
+    if run_exports := m.meta.get("build", {}).get("run_exports", {}):
         with open(os.path.join(m.config.info_dir, "run_exports.json"), "w") as f:
             if not hasattr(run_exports, "keys"):
                 run_exports = {"weak": run_exports}
@@ -1612,10 +1542,14 @@ def get_short_path(m, target_file):
 
 
 def has_prefix(short_path, files_with_prefix):
-    for prefix, mode, filename in files_with_prefix:
-        if short_path == filename:
-            return prefix, mode
-    return None, None
+    return next(
+        (
+            (prefix, mode)
+            for prefix, mode, filename in files_with_prefix
+            if short_path == filename
+        ),
+        (None, None),
+    )
 
 
 def is_no_link(no_link, short_path):
@@ -1672,7 +1606,7 @@ def _recurse_symlink_to_size(path, seen=None):
             return _recurse_symlink_to_size(dest, seen=seen)
         elif not isfile(dest):
             # this is a symlink that points to nowhere, so is zero bytes
-            warnings.warn("file %s is a symlink with no target" % path, UserWarning)
+            warnings.warn(f"file {path} is a symlink with no target", UserWarning)
             return 0
 
     return 0
@@ -1699,8 +1633,7 @@ def build_info_files_json_v1(m, prefix, files, files_with_prefix):
             file_info["size_in_bytes"] = _recurse_symlink_to_size(path)
         elif isdir(path):
             file_info["size_in_bytes"] = 0
-        no_link = is_no_link(no_link_files, fi)
-        if no_link:
+        if no_link := is_no_link(no_link_files, fi):
             file_info["no_link"] = no_link
         if prefix_placeholder and file_mode:
             file_info["prefix_placeholder"] = prefix_placeholder
@@ -1740,13 +1673,7 @@ def create_info_files_json_v1(m, info_dir, prefix, files, files_with_prefix):
                 separators=(",", ": "),
                 cls=EntityEncoder,
             )
-    # Return a dict of file: sha1sum. We could (but currently do not)
-    # use this to detect overlap and mutated overlap.
-    checksums = dict()
-    for file in files_json_files:
-        checksums[file["_path"]] = file["sha256"]
-
-    return checksums
+    return {file["_path"]: file["sha256"] for file in files_json_files}
 
 
 def post_process_files(m, initial_prefix_files):

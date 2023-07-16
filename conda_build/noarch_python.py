@@ -17,7 +17,7 @@ def _force_dir(dirname):
 
 
 def _error_exit(exit_message):
-    sys.exit("[noarch_python] %s" % exit_message)
+    sys.exit(f"[noarch_python] {exit_message}")
 
 
 def rewrite_script(fn, prefix):
@@ -35,7 +35,7 @@ def rewrite_script(fn, prefix):
         try:
             data = fi.read()
         except UnicodeDecodeError:  # file is binary
-            _error_exit("Noarch package contains binary script: %s" % fn)
+            _error_exit(f"Noarch package contains binary script: {fn}")
     src_mode = os.stat(src).st_mode
     os.unlink(src)
 
@@ -62,7 +62,7 @@ def handle_file(f, d, prefix):
         os.unlink(path)
 
     elif f.endswith(".exe") and (
-        isfile(os.path.join(prefix, f[:-4] + "-script.py"))
+        isfile(os.path.join(prefix, f"{f[:-4]}-script.py"))
         or basename(f[:-4]) in d["python-scripts"]
     ):
         os.unlink(path)  # this is an entry point with a matching xx-script.py
@@ -78,21 +78,17 @@ def handle_file(f, d, prefix):
         shutil.move(path, dst)
         d["site-packages"].append(g[14:])
 
-    # Treat scripts specially with the logic from above
     elif f.startswith(("bin/", "Scripts")):
         fn = basename(path)
         fn = rewrite_script(fn, prefix)
         d["python-scripts"].append(fn)
 
-    # Include examples in the metadata doc
     elif f.startswith(("Examples/", "Examples\\")):
         d["Examples"].append(f[9:])
-    # No special treatment for other files
-    # leave them as-is
     else:
         # this should be the built-in logging module, not conda-build's stuff, because this file is standalone.
         log = logging.getLogger(__name__)
-        log.debug("Don't know how to handle file: %s.  Including it as-is." % f)
+        log.debug(f"Don't know how to handle file: {f}.  Including it as-is.")
 
 
 def populate_files(m, files, prefix, entry_point_scripts=None):
@@ -128,7 +124,7 @@ def transform(m, files, prefix):
 
     # Create *nix prelink script
     # Note: it's important to use LF newlines or it wont work if we build on Win
-    with open(join(bin_dir, ".%s-pre-link.sh" % name), "wb") as fo:
+    with open(join(bin_dir, f".{name}-pre-link.sh"), "wb") as fo:
         fo.write(
             b"""\
     #!/bin/bash
@@ -137,7 +133,7 @@ def transform(m, files, prefix):
         )
 
     # Create windows prelink script (be nice and use Windows newlines)
-    with open(join(scripts_dir, ".%s-pre-link.bat" % name), "wb") as fo:
+    with open(join(scripts_dir, f".{name}-pre-link.bat"), "wb") as fo:
         fo.write(
             """\
     @echo off

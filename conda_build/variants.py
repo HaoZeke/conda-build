@@ -102,7 +102,7 @@ def _get_default_compilers(platform, py_ver):
         compilers["c"] = compilers["c"][py_ver]
         compilers["cxx"] = compilers["cxx"][py_ver]
     compilers = {
-        lang + "_compiler": pkg_name
+        f"{lang}_compiler": pkg_name
         for lang, pkg_name in compilers.items()
         if lang != "vc"
     }
@@ -161,10 +161,9 @@ def validate_spec(src, spec):
         # check for duplicate keys
         unique = set()
         errors.extend(
-            "  zip_key entry {} in group {} is a duplicate, keys can only occur "
-            "in one group".format(k, zg)
-            # include error if key has already been seen, otherwise add to unique keys
-            if k in unique else unique.add(k)
+            f"  zip_key entry {k} in group {zg} is a duplicate, keys can only occur in one group"
+            if k in unique
+            else unique.add(k)
             for zg in zip_keys
             for k in zg
         )
@@ -181,9 +180,7 @@ def validate_spec(src, spec):
             > 1
         )
 
-    # filter out None values that were potentially added above
-    errors = list(filter(None, errors))
-    if errors:
+    if errors := list(filter(None, errors)):
         raise ValueError(
             "Variant configuration errors in {}:\n{}".format(src, "\n".join(errors))
         )
@@ -273,78 +270,62 @@ def _combine_spec_dictionaries(
                         # should always be a list of lists, but users may specify as just a list
                         values[k] = values.get(k, [])
                         values[k].extend(v)
-                        values[k] = list(
+                        values[k] = [
                             list(set_group)
-                            for set_group in {tuple(group) for group in values[k]}
-                        )
+                            for set_group in {
+                                tuple(group) for group in values[k]
+                            }
+                        ]
+                    elif hasattr(v, "keys"):
+                        values[k] = v.copy()
                     else:
-                        if hasattr(v, "keys"):
-                            values[k] = v.copy()
-                        else:
-                            # default "group" is just this one key.  We latch onto other groups if
-                            #     they exist
-                            keys_in_group = [k]
-                            if zip_keys:
-                                for group in zip_keys:
-                                    if k in group:
-                                        keys_in_group = group
-                                        break
+                        # default "group" is just this one key.  We latch onto other groups if
+                        #     they exist
+                        keys_in_group = [k]
+                        if zip_keys:
+                            for group in zip_keys:
+                                if k in group:
+                                    keys_in_group = group
+                                    break
                             # in order to clobber, one must replace ALL of the zipped keys.
                             # or the length must match with the other items in the group
                             #    Otherwise, we filter later.
-                            if all(group_item in spec for group_item in keys_in_group):
-                                for group_item in keys_in_group:
-                                    if len(ensure_list(spec[group_item])) != len(
-                                        ensure_list(v)
-                                    ):
-                                        raise ValueError(
-                                            "All entries associated by a zip_key "
-                                            "field must be the same length.  In {}, {} and {} are "
-                                            "different ({} and {})".format(
-                                                spec_source,
-                                                k,
-                                                group_item,
-                                                len(ensure_list(v)),
-                                                len(ensure_list(spec[group_item])),
-                                            )
-                                        )
+                        if all(group_item in spec for group_item in keys_in_group):
+                            for group_item in keys_in_group:
+                                if len(ensure_list(spec[group_item])) == len(
+                                    ensure_list(v)
+                                ):
                                     values[group_item] = ensure_list(spec[group_item])
-                            elif k in values:
-                                for group_item in keys_in_group:
-                                    if group_item in spec and len(
-                                        ensure_list(spec[group_item])
-                                    ) != len(ensure_list(v)):
-                                        break
-                                    if group_item in values and len(
-                                        ensure_list(values[group_item])
-                                    ) != len(ensure_list(v)):
-                                        break
                                 else:
-                                    values[k] = v.copy()
-                                missing_subvalues = [
-                                    subvalue
-                                    for subvalue in ensure_list(v)
-                                    if subvalue not in values[k]
-                                ]
-                                missing_group_items = [
-                                    group_item
-                                    for group_item in keys_in_group
-                                    if group_item not in spec
-                                ]
-                                if len(missing_subvalues):
                                     raise ValueError(
-                                        "variant config in {} is ambiguous because it\n"
-                                        "does not fully implement all zipped keys (To be clear: missing {})\n"
-                                        "or specifies a subspace that is not fully implemented (To be clear:\n"
-                                        ".. we did not find {} from {} in {}:{}).".format(
-                                            spec_source,
-                                            missing_group_items,
-                                            missing_subvalues,
-                                            spec,
-                                            k,
-                                            values[k],
-                                        )
+                                        f"All entries associated by a zip_key field must be the same length.  In {spec_source}, {k} and {group_item} are different ({len(ensure_list(v))} and {len(ensure_list(spec[group_item]))})"
                                     )
+                        elif k in values:
+                            for group_item in keys_in_group:
+                                if group_item in spec and len(
+                                    ensure_list(spec[group_item])
+                                ) != len(ensure_list(v)):
+                                    break
+                                if group_item in values and len(
+                                    ensure_list(values[group_item])
+                                ) != len(ensure_list(v)):
+                                    break
+                            else:
+                                values[k] = v.copy()
+                            missing_subvalues = [
+                                subvalue
+                                for subvalue in ensure_list(v)
+                                if subvalue not in values[k]
+                            ]
+                            missing_group_items = [
+                                group_item
+                                for group_item in keys_in_group
+                                if group_item not in spec
+                            ]
+                            if len(missing_subvalues):
+                                raise ValueError(
+                                    f"variant config in {spec_source} is ambiguous because it\ndoes not fully implement all zipped keys (To be clear: missing {missing_group_items})\nor specifies a subspace that is not fully implemented (To be clear:\n.. we did not find {missing_subvalues} from {spec} in {k}:{values[k]})."
+                                )
 
     return values
 
@@ -374,10 +355,12 @@ def combine_specs(specs, log_output=True):
     zip_keys = _combine_spec_dictionaries(
         specs, extend_keys=extend_keys, filter_keys=["zip_keys"], log_output=log_output
     ).get("zip_keys", [])
-    values = _combine_spec_dictionaries(
-        specs, extend_keys=extend_keys, zip_keys=zip_keys, log_output=log_output
+    return _combine_spec_dictionaries(
+        specs,
+        extend_keys=extend_keys,
+        zip_keys=zip_keys,
+        log_output=log_output,
     )
-    return values
 
 
 def set_language_env_vars(variant):
@@ -393,7 +376,7 @@ def set_language_env_vars(variant):
             # legacy compatibility: python should be just first
             if env_var_name == "PY":
                 value = "".join(value.split(".")[:2])
-            env["CONDA_" + env_var_name] = value
+            env[f"CONDA_{env_var_name}"] = value
     return env
 
 
@@ -563,12 +546,11 @@ def explode_variants(spec):
     # key/values from spec that do explode
     explode_keys = _get_explode_keys(spec, passthru_keys)
     explode = {
-        (k,): [ensure_list(v, include_dict=False) for v in ensure_list(spec[k])]
+        (k,): [
+            ensure_list(v, include_dict=False) for v in ensure_list(spec[k])
+        ]
         for k in explode_keys.difference(*zip_keys)
-    }
-    explode.update(
-        {zg: list(zip(*(ensure_list(spec[k]) for k in zg))) for zg in zip_keys}
-    )
+    } | {zg: list(zip(*(ensure_list(spec[k]) for k in zg))) for zg in zip_keys}
     trim_empty_keys(explode)
 
     # Cartesian Product of dict of lists
@@ -576,10 +558,9 @@ def explode_variants(spec):
     # dict.keys() and dict.values() orders are the same even prior to Python 3.6
     variants = []
     for values in product(*explode.values()):
-        variant = {k: copy(v) for k, v in passthru.items()}
-        variant.update(
-            {k: v for zg, zv in zip(explode, values) for k, v in zip(zg, zv)}
-        )
+        variant = {k: copy(v) for k, v in passthru.items()} | {
+            k: v for zg, zv in zip(explode, values) for k, v in zip(zg, zv)
+        }
         variants.append(variant)
     return variants
 
@@ -605,9 +586,7 @@ def list_of_dicts_to_dict_of_lists(list_of_dicts):
         else []
     )
     if zip_key_groups:
-        if isinstance(list_of_dicts[0]["zip_keys"][0], list) or isinstance(
-            list_of_dicts[0]["zip_keys"][0], tuple
-        ):
+        if isinstance(list_of_dicts[0]["zip_keys"][0], (list, tuple)):
             groups = list_of_dicts[0]["zip_keys"]
         else:
             groups = [list_of_dicts[0]["zip_keys"]]
@@ -704,7 +683,7 @@ def get_vars(variants, loop_only=False):
     to the matrix dimensionality"""
     special_keys = {"pin_run_as_build", "zip_keys", "ignore_version"}
     special_keys.update(set(ensure_list(variants[0].get("extend_keys"))))
-    loop_vars = [
+    return [
         k
         for k in variants[0]
         if k not in special_keys
@@ -713,7 +692,6 @@ def get_vars(variants, loop_only=False):
             or any(variant[k] != variants[0][k] for variant in variants[1:])
         )
     ]
-    return loop_vars
 
 
 @lru_cache(maxsize=None)
@@ -724,7 +702,7 @@ def find_used_variables_in_text(variant, recipe_text, selectors_only=False):
         all_res = []
         compiler_match = re.match(r"(.*?)_compiler(_version)?$", v)
         if compiler_match and not selectors_only:
-            compiler_lang = compiler_match.group(1)
+            compiler_lang = compiler_match[1]
             compiler_regex = r"\{\s*compiler\([\'\"]%s[\"\'][^\{]*?\}" % re.escape(
                 compiler_lang
             )
@@ -745,11 +723,11 @@ def find_used_variables_in_text(variant, recipe_text, selectors_only=False):
         conditional_regex = (
             r"(?:^|[^\{])\{%\s*(?:el)?if\s*.*" + v_regex + r"\s*(?:[^%]*?)?%\}"
         )
-        # plain req name, no version spec.  Look for end of line after name, or comment or selector
-        requirement_regex = r"^\s+\-\s+%s\s*(?:\s[\[#]|$)" % v_req_regex
         if selectors_only:
             all_res.insert(0, selector_regex)
         else:
+            # plain req name, no version spec.  Look for end of line after name, or comment or selector
+            requirement_regex = r"^\s+\-\s+%s\s*(?:\s[\[#]|$)" % v_req_regex
             all_res.extend([variant_regex, requirement_regex, conditional_regex])
         # consolidate all re's into one big one for speedup
         all_res = r"|".join(all_res)

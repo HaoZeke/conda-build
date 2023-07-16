@@ -308,11 +308,7 @@ def list_skeletons():
     import pkgutil
 
     modules = pkgutil.iter_modules([join(dirname(__file__), "skeletons")])
-    files = []
-    for _, name, _ in modules:
-        if not name.startswith("_"):
-            files.append(name)
-    return files
+    return [name for _, name, _ in modules if not name.startswith("_")]
 
 
 def skeletonize(
@@ -323,12 +319,12 @@ def skeletonize(
 
     version = getattr(config, "version", version)
     if version:
-        kwargs.update({"version": version})
+        kwargs["version"] = version
     if recursive:
-        kwargs.update({"recursive": recursive})
+        kwargs["recursive"] = recursive
     if output_dir != ".":
         output_dir = expanduser(output_dir)
-        kwargs.update({"output_dir": output_dir})
+        kwargs["output_dir"] = output_dir
 
     # here we're dumping all extra kwargs as attributes on the config object.  We'll extract
     #    only relevant ones below
@@ -350,7 +346,7 @@ def skeletonize(
 
     func_args = module.skeletonize.__code__.co_varnames
     kwargs = {name: getattr(config, name) for name in dir(config) if name in func_args}
-    kwargs.update({name: value for name, value in kwargs.items() if name in func_args})
+    kwargs |= {name: value for name, value in kwargs.items() if name in func_args}
     # strip out local arguments that we pass directly
     for arg in skeletonize.__code__.co_varnames:
         if arg in kwargs:
@@ -417,7 +413,7 @@ def convert(
             "Conversion from wheel packages is not " "implemented yet, stay tuned."
         )
     else:
-        raise RuntimeError("cannot convert: %s" % package_file)
+        raise RuntimeError(f"cannot convert: {package_file}")
 
 
 def test_installable(channel="defaults"):
@@ -635,7 +631,7 @@ def debug(
                 metadata_tuples.append((metadata, False, True))
         else:
             ext = os.path.splitext(recipe_or_package_path_or_metadata_tuples)[1]
-            if not ext or not any(ext in _ for _ in CONDA_PACKAGE_EXTENSIONS):
+            if not ext or all(ext not in _ for _ in CONDA_PACKAGE_EXTENSIONS):
                 metadata_tuples = render(
                     recipe_or_package_path_or_metadata_tuples, config=config, **kwargs
                 )
@@ -655,8 +651,7 @@ def debug(
             ]
             if len(matched_outputs) > 1:
                 raise ValueError(
-                    "Specified --output-id matches more than one output ({}).  Please refine your output id so that only "
-                    "a single output is found.".format(matched_outputs)
+                    f"Specified --output-id matches more than one output ({matched_outputs}).  Please refine your output id so that only a single output is found."
                 )
             elif not matched_outputs:
                 raise ValueError(
@@ -664,8 +659,7 @@ def debug(
                 )
         if len(matched_outputs) > 1 and not path_is_build_dir:
             raise ValueError(
-                "More than one output found for this recipe ({}).  Please use the --output-id argument to filter down "
-                "to a single output.".format(outputs)
+                f"More than one output found for this recipe ({outputs}).  Please use the --output-id argument to filter down to a single output."
             )
         else:
             matched_outputs = outputs
@@ -677,14 +671,11 @@ def debug(
     if best_link_source_method == "symlink":
         for metadata, _, _ in metadata_tuples:
             debug_source_loc = os.path.join(
-                os.sep + "usr",
+                f"{os.sep}usr",
                 "local",
                 "src",
                 "conda",
-                "{}-{}".format(
-                    metadata.get_value("package/name"),
-                    metadata.get_value("package/version"),
-                ),
+                f'{metadata.get_value("package/name")}-{metadata.get_value("package/version")}',
             )
             link_target = os.path.dirname(metadata.meta_path)
             try:
@@ -703,16 +694,10 @@ def debug(
                 os.symlink(link_target, debug_source_loc)
             except PermissionError as e:
                 raise Exception(
-                    "You do not have the necessary permissions to create symlinks in {}\nerror: {}".format(
-                        dn, str(e)
-                    )
+                    f"You do not have the necessary permissions to create symlinks in {dn}\nerror: {str(e)}"
                 )
             except Exception as e:
-                raise Exception(
-                    "Unknown error creating symlinks in {}\nerror: {}".format(
-                        dn, str(e)
-                    )
-                )
+                raise Exception(f"Unknown error creating symlinks in {dn}\nerror: {str(e)}")
     ext = ".bat" if on_win else ".sh"
 
     if verbose:
@@ -721,8 +706,8 @@ def debug(
         log_context = LoggingContext(logging.CRITICAL + 1)
 
     if path_is_build_dir:
-        activation_file = "build_env_setup" + ext
-        activation_string = "cd {work_dir} && {source} {activation_file}\n".format(
+        activation_file = f"build_env_setup{ext}"
+        return "cd {work_dir} && {source} {activation_file}\n".format(
             work_dir=target_metadata.config.work_dir,
             source="call" if on_win else "source",
             activation_file=os.path.join(
@@ -732,8 +717,8 @@ def debug(
     elif not test:
         with log_context:
             run_build(target_metadata, stats={}, provision_only=True)
-        activation_file = "build_env_setup" + ext
-        activation_string = "cd {work_dir} && {source} {activation_file}\n".format(
+        activation_file = f"build_env_setup{ext}"
+        return "cd {work_dir} && {source} {activation_file}\n".format(
             work_dir=target_metadata.config.work_dir,
             source="call" if on_win else "source",
             activation_file=os.path.join(
@@ -752,10 +737,9 @@ def debug(
         # tell people what steps to take next
         with log_context:
             run_test(test_input, config=config, stats={}, provision_only=True)
-        activation_file = os.path.join(config.test_dir, "conda_test_env_vars" + ext)
-        activation_string = "cd {work_dir} && {source} {activation_file}\n".format(
+        activation_file = os.path.join(config.test_dir, f"conda_test_env_vars{ext}")
+        return "cd {work_dir} && {source} {activation_file}\n".format(
             work_dir=config.test_dir,
             source="call" if on_win else "source",
             activation_file=os.path.join(config.test_dir, activation_file),
         )
-    return activation_string

@@ -137,22 +137,18 @@ def replace_path(binary, path, prefix):
         if path == basename(binary):
             return abspath(join(prefix, binary))
         if "@rpath" in path:
-            rpaths = get_rpaths(join(prefix, binary))
-            if not rpaths:
+            if not (rpaths := get_rpaths(join(prefix, binary))):
                 return "NO LC_RPATH FOUND"
+            for rpath in rpaths:
+                path1 = path.replace("@rpath", rpath)
+                path1 = path1.replace("@loader_path", join(prefix, dirname(binary)))
+                if exists(abspath(join(prefix, path1))):
+                    path = path1
+                    break
             else:
-                for rpath in rpaths:
-                    path1 = path.replace("@rpath", rpath)
-                    path1 = path1.replace("@loader_path", join(prefix, dirname(binary)))
-                    if exists(abspath(join(prefix, path1))):
-                        path = path1
-                        break
-                else:
-                    return "not found"
+                return "not found"
         path = path.replace("@loader_path", join(prefix, dirname(binary)))
-        if path.startswith("/"):
-            return abspath(path)
-        return "not found"
+        return abspath(path) if path.startswith("/") else "not found"
 
 
 def test_installable(channel="defaults"):
@@ -182,17 +178,13 @@ def test_installable(channel="defaults"):
             build = rec["build"]
             match = has_py.search(build)
             assert match if "py" in build else True, build
-            if match:
-                additional_packages = [f"python={match.group(1)}.{match.group(2)}"]
-            else:
-                additional_packages = []
-
+            additional_packages = [f"python={match[1]}.{match[2]}"] if match else []
             version = rec["version"]
             log.info("Testing %s=%s", name, version)
 
             try:
                 install_steps = check_install(
-                    [name + "=" + version] + additional_packages,
+                    [f"{name}={version}"] + additional_packages,
                     channel_urls=channels,
                     prepend=False,
                     platform=platform,
@@ -200,7 +192,6 @@ def test_installable(channel="defaults"):
                 success &= bool(install_steps)
             except KeyboardInterrupt:
                 raise
-            # sys.exit raises an exception that doesn't subclass from Exception
             except BaseException as e:
                 success = False
                 log.error(
@@ -278,7 +269,7 @@ def inspect_linkages(
                     else path
                 )
                 if path.startswith(prefix):
-                    in_prefix_path = re.sub("^" + prefix + "/", "", path)
+                    in_prefix_path = re.sub(f"^{prefix}/", "", path)
                     deps = list(which_package(in_prefix_path, prefix))
                     if len(deps) > 1:
                         deps_str = [str(dep) for dep in deps]
@@ -289,15 +280,11 @@ def inspect_linkages(
                         )
                     if not deps:
                         if exists(path):
-                            depmap["untracked"].append(
-                                (lib, path.split(prefix + "/", 1)[-1], binary)
-                            )
+                            depmap["untracked"].append((lib, path.split(f"{prefix}/", 1)[-1], binary))
                         else:
-                            depmap["not found"].append(
-                                (lib, path.split(prefix + "/", 1)[-1], binary)
-                            )
+                            depmap["not found"].append((lib, path.split(f"{prefix}/", 1)[-1], binary))
                     for d in deps:
-                        depmap[d].append((lib, path.split(prefix + "/", 1)[-1], binary))
+                        depmap[d].append((lib, path.split(f"{prefix}/", 1)[-1], binary))
                 elif path == "not found":
                     depmap["not found"].append((lib, path, binary))
                 else:
@@ -312,8 +299,8 @@ def inspect_linkages(
     elif groupby == "dependency":
         # {pkg: {dep: [files]}} -> {dep: {pkg: [files]}}
         inverted_map = defaultdict(lambda: defaultdict(list))
-        for pkg in pkgmap:
-            for dep in pkgmap[pkg]:
+        for pkg, value in pkgmap.items():
+            for dep in value:
                 if pkgmap[pkg][dep]:
                     inverted_map[dep][pkg] = pkgmap[pkg][dep]
 
@@ -324,7 +311,7 @@ def inspect_linkages(
             output_string += print_linkages(inverted_map[dep], show_files=show_files)
 
     else:
-        raise ValueError("Unrecognized groupby: %s" % groupby)
+        raise ValueError(f"Unrecognized groupby: {groupby}")
     if hasattr(output_string, "decode"):
         output_string = output_string.decode("utf-8")
     return output_string
@@ -374,8 +361,7 @@ def get_hash_input(packages):
     for pkg in ensure_list(packages):
         pkgname = os.path.basename(pkg)[:-8]
         hash_inputs[pkgname] = {}
-        hash_input = package_has_file(pkg, "info/hash_input.json")
-        if hash_input:
+        if hash_input := package_has_file(pkg, "info/hash_input.json"):
             hash_inputs[pkgname]["recipe"] = json.loads(hash_input)
         else:
             hash_inputs[pkgname] = "<no hash_input.json in file>"

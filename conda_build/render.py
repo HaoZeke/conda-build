@@ -58,10 +58,7 @@ def bldpkg_path(m):
     subdir = "noarch" if m.noarch or m.noarch_python else m.config.host_subdir
 
     if not hasattr(m, "type"):
-        if m.config.conda_pkg_format == "2":
-            pkg_type = "conda_v2"
-        else:
-            pkg_type = "conda"
+        pkg_type = "conda_v2" if m.config.conda_pkg_format == "2" else "conda"
     else:
         pkg_type = m.type
 
@@ -106,12 +103,15 @@ def _categorize_deps(m, specs, exclude_pattern, variant):
             if not is_subpackage:
                 dependencies.append(spec)
             # fill in variant version iff no version at all is provided
-            for key, value in variant.items():
-                # for sake of comparison, ignore dashes and underscores
-                if dash_or_under.sub("", key) == dash_or_under.sub(
-                    "", spec_name
-                ) and not re.search(r"%s\s+[0-9a-zA-Z\_\.\<\>\=\*]" % spec_name, spec):
-                    dependencies.append(" ".join((spec_name, value)))
+            dependencies.extend(
+                " ".join((spec_name, value))
+                for key, value in variant.items()
+                if dash_or_under.sub("", key)
+                == dash_or_under.sub("", spec_name)
+                and not re.search(
+                    r"%s\s+[0-9a-zA-Z\_\.\<\>\=\*]" % spec_name, spec
+                )
+            )
         elif exclude_pattern.match(spec):
             pass_through_deps.append(spec)
     return subpackages, dependencies, pass_through_deps
@@ -165,10 +165,7 @@ def get_env_dependencies(
             )
         except (UnsatisfiableError, DependencyNeedsBuildingError) as e:
             # we'll get here if the environment is unsatisfiable
-            if hasattr(e, "packages"):
-                unsat = ", ".join(e.packages)
-            else:
-                unsat = e.message
+            unsat = ", ".join(e.packages) if hasattr(e, "packages") else e.message
             if permit_unsatisfiable_variants:
                 actions = {}
             else:
@@ -196,9 +193,7 @@ def strip_channel(spec_str):
 def get_pin_from_build(m, dep, build_dep_versions):
     dep_split = dep.split()
     dep_name = dep_split[0]
-    build = ""
-    if len(dep_split) >= 3:
-        build = dep_split[2]
+    build = dep_split[2] if len(dep_split) >= 3 else ""
     pin = None
     version = build_dep_versions.get(dep_name) or m.config.variant.get(dep_name)
     if (
@@ -232,11 +227,9 @@ def _filter_run_exports(specs, ignore_list):
             if hasattr(spec, "decode"):
                 spec = spec.decode()
             if not any(
-                (
-                    ignore_spec == "*"
-                    or spec == ignore_spec
-                    or spec.startswith(ignore_spec + " ")
-                )
+                ignore_spec == "*"
+                or spec == ignore_spec
+                or spec.startswith(f"{ignore_spec} ")
                 for ignore_spec in ignore_list
             ):
                 filtered_specs[agent] = filtered_specs.get(agent, []) + [spec]
@@ -283,12 +276,11 @@ def _read_specs_from_package(pkg_loc, pkg_dist):
         if os.path.isfile(downstream_file):
             with open(downstream_file) as f:
                 specs = {"weak": [spec.rstrip() for spec in f.readlines()]}
-        # a later attempt: record more info in the yaml file, to support "strong" run exports
-        elif os.path.isfile(downstream_file + ".yaml"):
-            with open(downstream_file + ".yaml") as f:
+        elif os.path.isfile(f"{downstream_file}.yaml"):
+            with open(f"{downstream_file}.yaml") as f:
                 specs = yaml.safe_load(f)
-        elif os.path.isfile(downstream_file + ".json"):
-            with open(downstream_file + ".json") as f:
+        elif os.path.isfile(f"{downstream_file}.json"):
+            with open(f"{downstream_file}.json") as f:
                 specs = json.load(f)
     if not specs and pkg_loc and os.path.isfile(pkg_loc):
         # switching to json for consistency in conda-build 4
@@ -301,19 +293,16 @@ def _read_specs_from_package(pkg_loc, pkg_dist):
             specs = json.loads(specs_json)
         elif specs_yaml:
             specs = yaml.safe_load(specs_yaml)
-        else:
-            legacy_specs = utils.package_has_file(pkg_loc, "info/run_exports")
-            # exclude packages pinning themselves (makes no sense)
-            if legacy_specs:
-                weak_specs = set()
-                if hasattr(pkg_dist, "decode"):
-                    pkg_dist = pkg_dist.decode("utf-8")
-                for spec in legacy_specs.splitlines():
-                    if hasattr(spec, "decode"):
-                        spec = spec.decode("utf-8")
-                    if not spec.startswith(pkg_dist.rsplit("-", 2)[0]):
-                        weak_specs.add(spec.rstrip())
-                specs = {"weak": sorted(list(weak_specs))}
+        elif legacy_specs := utils.package_has_file(pkg_loc, "info/run_exports"):
+            if hasattr(pkg_dist, "decode"):
+                pkg_dist = pkg_dist.decode("utf-8")
+            weak_specs = set()
+            for spec in legacy_specs.splitlines():
+                if hasattr(spec, "decode"):
+                    spec = spec.decode("utf-8")
+                if not spec.startswith(pkg_dist.rsplit("-", 2)[0]):
+                    weak_specs.add(spec.rstrip())
+            specs = {"weak": sorted(list(weak_specs))}
     return specs
 
 
@@ -421,8 +410,7 @@ def get_upstream_pins(m, actions, env):
                 m, actions, env=env, package_subset=pkg
             )[pkg]
             run_exports = _read_specs_from_package(loc, dist)
-        specs = _filter_run_exports(run_exports, ignore_list)
-        if specs:
+        if specs := _filter_run_exports(run_exports, ignore_list):
             additional_specs = utils.merge_dicts_of_lists(additional_specs, specs)
     return additional_specs
 
@@ -463,10 +451,11 @@ def add_upstream_pins(m, permit_unsatisfiable_variants, exclude_pattern):
         requirements["host"] = host_reqs
 
         if not host_reqs:
-            matching_output = [
-                out for out in m.meta.get("outputs", []) if out.get("name") == m.name()
-            ]
-            if matching_output:
+            if matching_output := [
+                out
+                for out in m.meta.get("outputs", [])
+                if out.get("name") == m.name()
+            ]:
                 requirements = utils.expand_reqs(
                     matching_output[0].get("requirements", {})
                 )
@@ -498,14 +487,13 @@ def add_upstream_pins(m, permit_unsatisfiable_variants, exclude_pattern):
         if m.noarch or m.noarch_python:
             if m.build_is_host:
                 extra_run_specs = set(extra_run_specs_from_build.get("noarch", []))
-                extra_run_constrained_specs = set()
                 build_deps = set(build_deps or []).update(
                     extra_run_specs_from_build.get("noarch", [])
                 )
             else:
                 extra_run_specs = set()
-                extra_run_constrained_specs = set()
                 build_deps = set(build_deps or [])
+            extra_run_constrained_specs = set()
         else:
             extra_run_specs = set(extra_run_specs_from_build.get("strong", []))
             extra_run_constrained_specs = set(
@@ -564,12 +552,15 @@ def _simplify_to_exact_constraints(metadata):
             for dep in values:
                 if len(dep) > 1:
                     version, build = dep[:2]
-                    if not (any(c in version for c in (">", "<", "*")) or "*" in build):
+                    if (
+                        all(c not in version for c in (">", "<", "*"))
+                        and "*" not in build
+                    ):
                         exact_pins.append(dep)
             if len(values) == 1 and not any(values):
                 deps_list.append(name)
             elif exact_pins:
-                if not all(pin == exact_pins[0] for pin in exact_pins):
+                if any(pin != exact_pins[0] for pin in exact_pins):
                     raise ValueError(f"Conflicting exact pins: {exact_pins}")
                 else:
                     deps_list.append(" ".join([name] + exact_pins[0]))
@@ -654,7 +645,7 @@ def finalize_metadata(m, parent_metadata=None, permit_unsatisfiable_variants=Fal
         # if python is in the build specs, but doesn't have a specific associated
         #    version, make sure to add one
         if build_reqs and "python" in build_reqs:
-            build_reqs.append("python {}".format(m.config.variant["python"]))
+            build_reqs.append(f'python {m.config.variant["python"]}')
             m.meta["requirements"][pinning_env] = build_reqs
 
         full_build_deps, _, _ = get_env_dependencies(
@@ -688,8 +679,7 @@ def finalize_metadata(m, parent_metadata=None, permit_unsatisfiable_variants=Fal
 
         if m.pin_depends == "strict":
             m.meta["requirements"]["run"] = environ.get_pinned_deps(m, "run")
-        test_deps = m.get_value("test/requires")
-        if test_deps:
+        if test_deps := m.get_value("test/requires"):
             versioned_test_deps = list(
                 {
                     get_pin_from_build(m, dep, full_build_dep_versions)
@@ -715,12 +705,10 @@ def finalize_metadata(m, parent_metadata=None, permit_unsatisfiable_variants=Fal
                     m.meta["source"]["path"] = os.path.normpath(
                         os.path.join(m.path, source_path)
                     )
-                elif "git_url" in m.meta["source"] and not (
-                    # absolute paths are not relative paths
-                    os.path.isabs(m.meta["source"]["git_url"])
-                    or
-                    # real urls are not relative paths
-                    ":" in m.meta["source"]["git_url"]
+                elif (
+                    "git_url" in m.meta["source"]
+                    and not os.path.isabs(m.meta["source"]["git_url"])
+                    and ":" not in m.meta["source"]["git_url"]
                 ):
                     m.meta["source"]["git_url"] = os.path.normpath(
                         os.path.join(m.path, m.meta["source"]["git_url"])
@@ -735,15 +723,14 @@ def finalize_metadata(m, parent_metadata=None, permit_unsatisfiable_variants=Fal
             m.final = False
             log = utils.get_logger(__name__)
             log.warn(
-                "Returning non-final recipe for {}; one or more dependencies "
-                "was unsatisfiable:".format(m.dist())
+                f"Returning non-final recipe for {m.dist()}; one or more dependencies was unsatisfiable:"
             )
-            if build_unsat:
-                log.warn(f"Build: {build_unsat}")
-            if host_unsat:
-                log.warn(f"Host: {host_unsat}")
         else:
             m.final = True
+        if build_unsat:
+            log.warn(f"Build: {build_unsat}")
+        if host_unsat:
+            log.warn(f"Host: {host_unsat}")
     if is_top_level:
         parent_metadata = m
     return m
@@ -855,13 +842,7 @@ def distribute_variants(
         if mv.numpy_xx and "numpy" not in pin_run_as_build:
             pin_run_as_build["numpy"] = {"min_pin": "x.x", "max_pin": "x.x"}
 
-        conform_dict = {}
-        for key in used_variables:
-            # We use this variant in the top-level recipe.
-            # constrain the stored variants to only this version in the output
-            #     variant mapping
-            conform_dict[key] = variant[key]
-
+        conform_dict = {key: variant[key] for key in used_variables}
         for key, values in conform_dict.items():
             mv.config.variants = (
                 filter_by_key_value(
@@ -956,14 +937,14 @@ def render_recipe(
             recipe_dir = os.path.dirname(arg)
             need_cleanup = False
         else:
-            print("Ignoring non-recipe: %s" % arg)
+            print(f"Ignoring non-recipe: {arg}")
             return None, None
     else:
         recipe_dir = abspath(arg)
         need_cleanup = False
 
     if not isdir(recipe_dir):
-        sys.exit("Error: no such directory: %s" % recipe_dir)
+        sys.exit(f"Error: no such directory: {recipe_dir}")
 
     try:
         m = MetaData(recipe_dir, config=config)
@@ -1042,8 +1023,7 @@ def _represent_omap(dumper, data):
 
 
 def _unicode_representer(dumper, uni):
-    node = yaml.ScalarNode(tag="tag:yaml.org,2002:str", value=uni)
-    return node
+    return yaml.ScalarNode(tag="tag:yaml.org,2002:str", value=uni)
 
 
 class _IndentDumper(yaml.Dumper):
@@ -1073,14 +1053,13 @@ def output_yaml(metadata, filename=None, suppress_outputs=False):
         default_flow_style=False,
         indent=2,
     )
-    if filename:
-        if any(sep in filename for sep in ("\\", "/")):
-            try:
-                os.makedirs(os.path.dirname(filename))
-            except OSError:
-                pass
-        with open(filename, "w") as f:
-            f.write(output)
-        return "Wrote yaml to %s" % filename
-    else:
+    if not filename:
         return output
+    if any(sep in filename for sep in ("\\", "/")):
+        try:
+            os.makedirs(os.path.dirname(filename))
+        except OSError:
+            pass
+    with open(filename, "w") as f:
+        f.write(output)
+    return f"Wrote yaml to {filename}"

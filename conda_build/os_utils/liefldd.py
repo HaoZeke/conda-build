@@ -50,13 +50,10 @@ def is_string(s):
 def ensure_binary(file):
     if not is_string(file):
         return file
-    else:
-        try:
-            if not os.path.exists(file):
-                return []
-            return lief.parse(file)
-        except:
-            print(f"WARNING: liefldd: failed to ensure_binary({file})")
+    try:
+        return [] if not os.path.exists(file) else lief.parse(file)
+    except:
+        print(f"WARNING: liefldd: failed to ensure_binary({file})")
     return None
 
 
@@ -107,8 +104,7 @@ def _trim_sysroot(sysroot):
 
 def get_libraries(file):
     result = []
-    binary = ensure_binary(file)
-    if binary:
+    if binary := ensure_binary(file):
         if binary.format == lief.EXE_FORMATS.PE:
             result = binary.libraries
         else:
@@ -178,10 +174,10 @@ if have_lief:
             binary_format = binary.format
             if binary_format == lief.EXE_FORMATS.ELF:
                 binary_type = binary.type
-                if (
-                    binary_type == lief.ELF.ELF_CLASS.CLASS32
-                    or binary_type == lief.ELF.ELF_CLASS.CLASS64
-                ):
+                if binary_type in [
+                    lief.ELF.ELF_CLASS.CLASS32,
+                    lief.ELF.ELF_CLASS.CLASS64,
+                ]:
                     rpaths = _get_elf_rpathy_thing(binary, elf_attribute, elf_dyn_tag)
             elif (
                 binary_format == lief.EXE_FORMATS.MACHO
@@ -234,10 +230,10 @@ def set_rpath(old_matching, new_rpath, file):
     binary = ensure_binary(file)
     if not binary:
         return
-    if binary.format == lief.EXE_FORMATS.ELF and (
-        binary.type == lief.ELF.ELF_CLASS.CLASS32
-        or binary.type == lief.ELF.ELF_CLASS.CLASS64
-    ):
+    if binary.format == lief.EXE_FORMATS.ELF and binary.type in [
+        lief.ELF.ELF_CLASS.CLASS32,
+        lief.ELF.ELF_CLASS.CLASS64,
+    ]:
         if _set_elf_rpathy_thing(
             binary, old_matching, new_rpath, set_rpath=True, set_runpath=False
         ):
@@ -284,10 +280,7 @@ def _inspect_linkages_this(filename, sysroot="", arch="native"):
     sysroot = _trim_sysroot(sysroot)
     try:
         binary = lief.parse(filename)
-        # Future lief has this:
-        # json_data = json.loads(lief.to_json_from_abstract(binary))
-        json_data = json.loads(lief.to_json(binary))
-        if json_data:
+        if json_data := json.loads(lief.to_json(binary)):
             return (
                 filename,
                 json_data["imported_libraries"],
@@ -308,10 +301,7 @@ def to_os_varnames(binary, input_):
             .replace("$RPATH", "@rpath")
         )
     elif binary.format == lief.EXE_FORMATS.ELF:
-        if binary.ehdr.sz_ptr == 8:
-            libdir = "/lib64"
-        else:
-            libdir = "/lib"
+        libdir = "/lib64" if binary.ehdr.sz_ptr == 8 else "/lib"
         return input.replace("$SELFDIR", "$ORIGIN").replace(libdir, "$LIB")
 
 
@@ -324,10 +314,7 @@ def from_os_varnames(binary_format, binary_type, input_):
             .replace("@rpath", "$RPATH")
         )
     elif binary_format == lief.EXE_FORMATS.ELF:
-        if binary_type == lief.ELF.ELF_CLASS.CLASS64:
-            libdir = "/lib64"
-        else:
-            libdir = "/lib"
+        libdir = "/lib64" if binary_type == lief.ELF.ELF_CLASS.CLASS64 else "/lib"
         return input_.replace("$ORIGIN", "$SELFDIR").replace("$LIB", libdir)
     elif binary_format == lief.EXE_FORMATS.PE:
         return input_
@@ -349,15 +336,16 @@ def get_uniqueness_key(file):
         return lief.EXE_FORMATS.UNKNOWN
     elif binary.format == lief.EXE_FORMATS.MACHO:
         return binary.name
-    elif binary.format == lief.EXE_FORMATS.ELF and (  # noqa
-        binary.type == lief.ELF.ELF_CLASS.CLASS32
-        or binary.type == lief.ELF.ELF_CLASS.CLASS64
-    ):
+    elif binary.format == lief.EXE_FORMATS.ELF and binary.type in [
+        lief.ELF.ELF_CLASS.CLASS32,
+        lief.ELF.ELF_CLASS.CLASS64,
+    ]:
         dynamic_entries = binary.dynamic_entries
-        result = [
-            e.name for e in dynamic_entries if e.tag == lief.ELF.DYNAMIC_TAGS.SONAME
-        ]
-        if result:
+        if result := [
+            e.name
+            for e in dynamic_entries
+            if e.tag == lief.ELF.DYNAMIC_TAGS.SONAME
+        ]:
             return result[0]
         return binary.name
     return binary.name
@@ -440,11 +428,10 @@ def _get_resolved_location(
         resolved = unresolved.replace("$SELFDIR", selfdir).replace("$EXEDIR", exedir)
         exists = os.path.exists(resolved)
         exists_sysroot = exists and sysroot and resolved.startswith(sysroot)
+    elif unresolved.startswith("/"):
+        return unresolved, None, False
     else:
-        if unresolved.startswith("/"):
-            return unresolved, None, False
-        else:
-            return os.path.join(selfdir, unresolved), None, False
+        return os.path.join(selfdir, unresolved), None, False
 
     return resolved, rpath_result, exists_sysroot
 
@@ -489,7 +476,7 @@ def inspect_linkages_lief(
             "$SYSROOT/System32/WindowsPowerShell/v1.0",
         ]
     results = {}
-    rpaths_by_binary = dict()
+    rpaths_by_binary = {}
     parents_by_filename = dict({filename: None})
     while todo:
         for element in todo:
@@ -513,7 +500,7 @@ def inspect_linkages_lief(
                 else:
                     parent_exe_dirname = exedir
                 # This is a hack for Python on Windows. Sorry.
-                if ".pyd" in filename2 or (os.sep + "DLLs" + os.sep) in filename2:
+                if ".pyd" in filename2 or f"{os.sep}DLLs{os.sep}" in filename2:
                     parent_exe_dirname = envroot.replace(os.sep, "/") + "/DLLs"
                 rpaths_by_binary[filename2] = get_rpaths(
                     binary, parent_exe_dirname, envroot.replace(os.sep, "/"), sysroot
@@ -531,13 +518,11 @@ def inspect_linkages_lief(
                     libraries.remove(filename2)
                 # RPATH is implicit everywhere except macOS, make it explicit to simplify things.
                 these_orig = [
-                    (
-                        "$RPATH/" + lib
-                        if not lib.startswith("/")
-                        and not lib.startswith("$")
-                        and binary.format != lief.EXE_FORMATS.MACHO  # noqa
-                        else lib
-                    )
+                    f"$RPATH/{lib}"
+                    if not lib.startswith("/")
+                    and not lib.startswith("$")
+                    and binary.format != lief.EXE_FORMATS.MACHO
+                    else lib
                     for lib in libraries
                 ]
                 for lib, orig in zip(libraries, these_orig):
@@ -621,16 +606,7 @@ def get_linkages(
     )
     if debug and result_pyldd and set(result_lief) != set(result_pyldd):
         print(
-            "WARNING: Disagreement in get_linkages(filename={}, resolve_filenames={}, recurse={}, sysroot={}, envroot={}, arch={}):\n lief: {}\npyldd: {}\n  (using lief)".format(
-                filename,
-                resolve_filenames,
-                recurse,
-                sysroot,
-                envroot,
-                arch,
-                result_lief,
-                result_pyldd,
-            )
+            f"WARNING: Disagreement in get_linkages(filename={filename}, resolve_filenames={resolve_filenames}, recurse={recurse}, sysroot={sysroot}, envroot={envroot}, arch={arch}):\n lief: {result_lief}\npyldd: {result_pyldd}\n  (using lief)"
         )
     return result_lief
 
@@ -643,9 +619,8 @@ def get_imports(file, arch="native"):
 def _get_archive_signature(file):
     try:
         with open(file, "rb") as f:
-            index = 0
             content = f.read(8)
-            (signature,) = struct.unpack("<8s", content[index:8])
+            (signature,) = struct.unpack("<8s", content[:8])
             return signature, 8
     except:
         return "", 0
@@ -656,7 +631,7 @@ debug_static_archives = 0
 
 def is_archive(file):
     signature, _ = _get_archive_signature(file)
-    return True if signature == b"!<arch>\n" else False
+    return signature == b"!<arch>\n"
 
 
 def get_static_lib_exports(file):
@@ -693,7 +668,7 @@ def get_static_lib_exports(file):
             typ = "BSD"
             name_len = int(name[3:])
             (name,) = struct.unpack(
-                "<" + str(name_len) + "s",
+                f"<{name_len}s",
                 content[index + header_sz : index + header_sz + name_len],
             )
             if b"\x00" in name:
@@ -775,14 +750,15 @@ def get_static_lib_exports(file):
             ranlib_struct_sz = struct.calcsize(ranlib_struct_field_fmt) * 2
             toc_integers_sz = struct.calcsize(toc_integers_fmt)
             (size_ranlib_structs,) = struct.unpack(
-                "<" + toc_integers_fmt, content[index : index + toc_integers_sz]
+                f"<{toc_integers_fmt}",
+                content[index : index + toc_integers_sz],
             )
             # Each of the ranlib structures consists of a zero based offset into the next
             # section (a string table of symbols) and an offset from the beginning of
             # the archive to the start of the archive file which defines the symbol
             nsymbols = size_ranlib_structs // 8
             (size_string_table,) = struct.unpack(
-                "<" + toc_integers_fmt,
+                f"<{toc_integers_fmt}",
                 content[
                     index
                     + toc_integers_sz
@@ -796,7 +772,7 @@ def get_static_lib_exports(file):
             ranlib_index = index + (toc_integers_sz * 2)
             for i in range(nsymbols):
                 ran_off, ran_strx = struct.unpack(
-                    "<" + ranlib_struct_field_fmt + ranlib_struct_field_fmt,
+                    f"<{ranlib_struct_field_fmt}{ranlib_struct_field_fmt}",
                     content[
                         ranlib_index
                         + (i * ranlib_struct_sz) : ranlib_index
@@ -857,7 +833,6 @@ def get_static_lib_exports(file):
                         print(
                             "get_static_lib_exports failed, PECOFF not supported by LIEF nor pyldd."
                         )
-                    pass
                     obj = None
             elif MACHINE_TYPE == 0xFACF:
                 obj = lief.parse(raw=content[obj_start:obj_end])
@@ -900,9 +875,7 @@ def get_static_lib_exports_nm(filename):
         nm_exe = "C:\\msys64\\mingw64\\bin\\nm.exe"
     if not nm_exe or not os.path.exists(nm_exe):
         return None
-    flags = "-Pg"
-    if sys.platform == "darwin":
-        flags = "-PgUj"
+    flags = "-PgUj" if sys.platform == "darwin" else "-Pg"
     try:
         out, _ = Popen(
             [nm_exe, flags, filename], shell=False, stdout=PIPE
@@ -1023,7 +996,7 @@ def get_exports(filename, arch="native", enable_static=False):
             # g: global (exported) only
             # U: not undefined
             # j: name only
-            if debug_static_archives or sys.platform == "win32":
+            if debug_static_archives:
                 exports = get_static_lib_exports_externally(filename)
             # Now, our own implementation which does not require nm and can
             # handle .lib files.
@@ -1048,9 +1021,7 @@ def get_exports(filename, arch="native", enable_static=False):
                         print(f"errors: {error_count} (-{len(diff1)}, +{len(diff2)})")
                     if debug_static_archives:
                         print(
-                            "WARNING :: Disagreement regarding static lib exports in {} between nm (nsyms={}) and lielfldd (nsyms={}):".format(
-                                filename, len(exports), len(exports2)
-                            )
+                            f"WARNING :: Disagreement regarding static lib exports in {filename} between nm (nsyms={len(exports)}) and lielfldd (nsyms={len(exports2)}):"
                         )
                     print(
                         "** nm.diff(liefldd) [MISSING SYMBOLS] **\n{}".format(
@@ -1064,8 +1035,7 @@ def get_exports(filename, arch="native", enable_static=False):
                     )
 
     if not result:
-        binary = ensure_binary(filename)
-        if binary:
+        if binary := ensure_binary(filename):
             result = [str(e) for e in binary.exported_functions]
     return result
 
@@ -1075,8 +1045,8 @@ def get_relocations(filename, arch="native"):
         return []
     try:
         binary = lief.parse(filename)
-        res = []
         if len(binary.relocations):
+            res = []
             for r in binary.relocations:
                 if r.has_symbol:
                     if r.symbol and r.symbol.name:
@@ -1120,29 +1090,26 @@ def get_symbols(file, defined=True, undefined=True, notexported=False, arch="nat
         is_undefined = (
             index >= first_undefined_symbol and index <= last_undefined_symbol
         )
-        if binary.__class__ != lief.MachO.Binary:
-            if isinstance(s, str):
-                s_name = "%s" % s
-            else:
-                s_name = "%s" % s.name
-                if s.exported and s.imported:
-                    print(f"Weird, symbol {s.name} is both imported and exported")
-                if s.exported:
-                    is_undefined = True
-                    is_notexported = False
-                elif s.imported:
-                    is_undefined = False
-        else:
-            s_name = "%s" % s.name
-            is_notexported = False if s.type & 1 else True
+        if binary.__class__ == lief.MachO.Binary:
+            s_name = f"{s.name}"
+            is_notexported = not s.type & 1
 
+        elif isinstance(s, str):
+            s_name = f"{s}"
+        else:
+            s_name = f"{s.name}"
+            if s.exported and s.imported:
+                print(f"Weird, symbol {s.name} is both imported and exported")
+            if s.exported:
+                is_undefined = True
+                is_notexported = False
+            elif s.imported:
+                is_undefined = False
         # print("{:32s} : s.type 0b{:020b}, s.value 0b{:020b}".format(s.name, s.type, s.value))
         # print("s.value 0b{:020b} :: s.type 0b{:020b}, {:32s}".format(s.value, s.type, s.name))
-        if notexported is True or is_notexported is False:
-            if is_undefined and undefined:
-                res.append("%s" % s_name)
-            elif not is_undefined and defined:
-                res.append("%s" % s_name)
+        if notexported is True or not is_notexported:
+            if is_undefined and undefined or not is_undefined and defined:
+                res.append(f"{s_name}")
     return res
 
 
@@ -1167,10 +1134,10 @@ class memoized_by_arg0_filehash:
                 sha1 = hashlib.sha1()
                 with open(arg, "rb") as f:
                     while True:
-                        data = f.read(65536)
-                        if not data:
+                        if data := f.read(65536):
+                            sha1.update(data)
+                        else:
                             break
-                        sha1.update(data)
                 arg = sha1.hexdigest()
             if isinstance(arg, list):
                 newargs.append(tuple(arg))
@@ -1185,10 +1152,9 @@ class memoized_by_arg0_filehash:
         with self.lock:
             if key in self.cache:
                 return self.cache[key]
-            else:
-                value = self.func(*args, **kw)
-                self.cache[key] = value
-                return value
+            value = self.func(*args, **kw)
+            self.cache[key] = value
+            return value
 
 
 @memoized_by_arg0_filehash

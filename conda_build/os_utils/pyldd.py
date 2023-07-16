@@ -162,10 +162,7 @@ class ReadCheckWrapper:
         return buf
 
     def __getattr__(self, attr):
-        if attr == "read":
-            return self.read
-        else:
-            return getattr(self._file_obj, attr)
+        return self.read if attr == "read" else getattr(self._file_obj, attr)
 
 
 class fileview:
@@ -175,10 +172,7 @@ class fileview:
     """
 
     def __init__(self, fileobj, start=0, size=maxint):
-        if isinstance(fileobj, fileview):
-            self._fileobj = fileobj._fileobj
-        else:
-            self._fileobj = fileobj
+        self._fileobj = fileobj._fileobj if isinstance(fileobj, fileview) else fileobj
         self._start = start
         self._end = start + size
         self._pos = 0
@@ -262,9 +256,7 @@ def read_data(file, endian, num=1):
     with the given endianness.
     """
     res = struct.unpack(endian + "L" * num, file.read(num * 4))
-    if len(res) == 1:
-        return res[0]
-    return res
+    return res[0] if len(res) == 1 else res
 
 
 def replace_lc_load_dylib(file, where, bits, endian, cmd, cmdsize, what, val):
@@ -470,11 +462,10 @@ def _get_resolved_location(
         resolved = unresolved.replace("$SELFDIR", self_dir).replace("$EXEDIR", exe_dir)
         exists = os.path.exists(resolved)
         exists_sysroot = exists and sysroot and resolved.startswith(sysroot)
+    elif unresolved.startswith("/"):
+        return unresolved, None, False
     else:
-        if unresolved.startswith("/"):
-            return unresolved, None, False
-        else:
-            return os.path.join(self_dir, unresolved), None, False
+        return os.path.join(self_dir, unresolved), None, False
 
     return resolved, rpath_result, exists_sysroot
 
@@ -666,51 +657,44 @@ DT_HIPROC = 0x7FFFFFFF
 
 class elfheader:
     def __init__(self, file):
-        (self.hdr,) = struct.unpack(BIG_ENDIAN + "L", file.read(4))
+        (self.hdr,) = struct.unpack(f"{BIG_ENDIAN}L", file.read(4))
         self.dt_needed = []
         self.dt_rpath = []
         if self.hdr != ELF_HDR:
             return
-        (bitness,) = struct.unpack(LITTLE_ENDIAN + "B", file.read(1))
+        (bitness,) = struct.unpack(f"{LITTLE_ENDIAN}B", file.read(1))
         bitness = 32 if bitness == 1 else 64
-        sz_ptr = int(bitness / 8)
+        sz_ptr = bitness // 8
         ptr_type = "Q" if sz_ptr == 8 else "L"
         self.bitness = bitness
         self.sz_ptr = sz_ptr
         self.ptr_type = ptr_type
-        (endian,) = struct.unpack(LITTLE_ENDIAN + "B", file.read(1))
+        (endian,) = struct.unpack(f"{LITTLE_ENDIAN}B", file.read(1))
         endian = LITTLE_ENDIAN if endian == 1 else BIG_ENDIAN
         self.endian = endian
-        (self.version,) = struct.unpack(endian + "B", file.read(1))
-        (self.osabi,) = struct.unpack(endian + "B", file.read(1))
-        (self.abiver,) = struct.unpack(endian + "B", file.read(1))
+        (self.version,) = struct.unpack(f"{endian}B", file.read(1))
+        (self.osabi,) = struct.unpack(f"{endian}B", file.read(1))
+        (self.abiver,) = struct.unpack(f"{endian}B", file.read(1))
         struct.unpack(endian + "B" * 7, file.read(7))
-        (self.type,) = struct.unpack(endian + "H", file.read(2))
-        (self.machine,) = struct.unpack(endian + "H", file.read(2))
-        (self.version,) = struct.unpack(endian + "L", file.read(4))
+        (self.type,) = struct.unpack(f"{endian}H", file.read(2))
+        (self.machine,) = struct.unpack(f"{endian}H", file.read(2))
+        (self.version,) = struct.unpack(f"{endian}L", file.read(4))
         (self.entry,) = struct.unpack(endian + ptr_type, file.read(sz_ptr))
         (self.phoff,) = struct.unpack(endian + ptr_type, file.read(sz_ptr))
         (self.shoff,) = struct.unpack(endian + ptr_type, file.read(sz_ptr))
-        (self.flags,) = struct.unpack(endian + "L", file.read(4))
-        (self.ehsize,) = struct.unpack(endian + "H", file.read(2))
-        (self.phentsize,) = struct.unpack(endian + "H", file.read(2))
-        (self.phnum,) = struct.unpack(endian + "H", file.read(2))
-        (self.shentsize,) = struct.unpack(endian + "H", file.read(2))
-        (self.shnum,) = struct.unpack(endian + "H", file.read(2))
-        (self.shstrndx,) = struct.unpack(endian + "H", file.read(2))
+        (self.flags,) = struct.unpack(f"{endian}L", file.read(4))
+        (self.ehsize,) = struct.unpack(f"{endian}H", file.read(2))
+        (self.phentsize,) = struct.unpack(f"{endian}H", file.read(2))
+        (self.phnum,) = struct.unpack(f"{endian}H", file.read(2))
+        (self.shentsize,) = struct.unpack(f"{endian}H", file.read(2))
+        (self.shnum,) = struct.unpack(f"{endian}H", file.read(2))
+        (self.shstrndx,) = struct.unpack(f"{endian}H", file.read(2))
         loc = file.tell()
         if loc != self.ehsize:
             get_logger(__name__).warning(f"file.tell()={loc} != ehsize={self.ehsize}")
 
     def __str__(self):
-        return "bitness {}, endian {}, version {}, type {}, machine {}, entry {}".format(  # noqa
-            self.bitness,
-            self.endian,
-            self.version,
-            self.type,
-            hex(self.machine),
-            hex(self.entry),
-        )
+        return f"bitness {self.bitness}, endian {self.endian}, version {self.version}, type {self.type}, machine {hex(self.machine)}, entry {hex(self.entry)}"
 
 
 class elfsection:
@@ -720,22 +704,19 @@ class elfsection:
         endian = eh.endian
         # It'd be quicker to use struct.calcsize here and a single
         # struct.unpack but it would be ugly and harder to maintain.
-        (self.sh_name,) = struct.unpack(endian + "L", file.read(4))
-        (self.sh_type,) = struct.unpack(endian + "L", file.read(4))
+        (self.sh_name,) = struct.unpack(f"{endian}L", file.read(4))
+        (self.sh_type,) = struct.unpack(f"{endian}L", file.read(4))
         (self.sh_flags,) = struct.unpack(endian + ptr_type, file.read(sz_ptr))
         (self.sh_addr,) = struct.unpack(endian + ptr_type, file.read(sz_ptr))
         (self.sh_offset,) = struct.unpack(endian + ptr_type, file.read(sz_ptr))
         (self.sh_size,) = struct.unpack(endian + ptr_type, file.read(sz_ptr))
-        (self.sh_link,) = struct.unpack(endian + "L", file.read(4))
-        (self.sh_info,) = struct.unpack(endian + "L", file.read(4))
+        (self.sh_link,) = struct.unpack(f"{endian}L", file.read(4))
+        (self.sh_info,) = struct.unpack(f"{endian}L", file.read(4))
         (self.sh_addralign,) = struct.unpack(endian + ptr_type, file.read(sz_ptr))
         (self.sh_entsize,) = struct.unpack(endian + ptr_type, file.read(sz_ptr))
         # Lower priority == post processed earlier so that those
         # with higher priority can assume already initialized.
-        if self.sh_type == SHT_STRTAB:
-            self.priority = 0
-        else:
-            self.priority = 1
+        self.priority = 0 if self.sh_type == SHT_STRTAB else 1
 
     def postprocess(self, elffile, file):
         ptr_type = elffile.ehdr.ptr_type
@@ -843,16 +824,16 @@ class programheader:
         ptr_type = eh.ptr_type
         sz_ptr = eh.sz_ptr
         endian = eh.endian
-        (self.p_type,) = struct.unpack(endian + "L", file.read(4))
+        (self.p_type,) = struct.unpack(f"{endian}L", file.read(4))
         if eh.bitness == 64:
-            (self.p_flags,) = struct.unpack(endian + "L", file.read(4))
+            (self.p_flags,) = struct.unpack(f"{endian}L", file.read(4))
         (self.p_offset,) = struct.unpack(endian + ptr_type, file.read(sz_ptr))
         (self.p_vaddr,) = struct.unpack(endian + ptr_type, file.read(sz_ptr))
         (self.p_paddr,) = struct.unpack(endian + ptr_type, file.read(sz_ptr))
         (self.p_filesz,) = struct.unpack(endian + ptr_type, file.read(sz_ptr))
         (self.p_memsz,) = struct.unpack(endian + ptr_type, file.read(sz_ptr))
         if eh.bitness == 32:
-            (self.p_flags,) = struct.unpack(endian + "L", file.read(4))
+            (self.p_flags,) = struct.unpack(f"{endian}L", file.read(4))
         (self.p_align,) = struct.unpack(endian + ptr_type, file.read(sz_ptr))
 
     def postprocess(self, elffile, file):
@@ -913,22 +894,16 @@ class elffile(UnixExecutable):
         ]
         # Lookup must be avoided when DT_NEEDED contains any '/'s
         self.shared_libraries = [
-            (needed, needed if "/" in needed else "$RPATH/" + needed)
+            (needed, needed if "/" in needed else f"$RPATH/{needed}")
             for needed in self.dt_needed
         ]
 
     def to_os_varnames(self, input):
-        if self.ehdr.sz_ptr == 8:
-            libdir = "/lib64"
-        else:
-            libdir = "/lib"
+        libdir = "/lib64" if self.ehdr.sz_ptr == 8 else "/lib"
         return input.replace("$SELFDIR", "$ORIGIN").replace(libdir, "$LIB")
 
     def from_os_varnames(self, input):
-        if self.ehdr.sz_ptr == 8:
-            libdir = "/lib64"
-        else:
-            libdir = "/lib"
+        libdir = "/lib64" if self.ehdr.sz_ptr == 8 else "/lib"
         return input.replace("$ORIGIN", "$SELFDIR").replace("$LIB", libdir)
 
     def find_section_and_offset(self, addr):
@@ -1018,7 +993,7 @@ class EXEfile:
 def codefile(file, arch="any", initial_rpaths_transitive=[]):
     if file.name.endswith(".dll"):
         return DLLfile(file, list(initial_rpaths_transitive))
-    (magic,) = struct.unpack(BIG_ENDIAN + "L", file.read(4))
+    (magic,) = struct.unpack(f"{BIG_ENDIAN}L", file.read(4))
     file.seek(0)
     if magic in (FAT_MAGIC, MH_MAGIC, MH_CIGAM, MH_CIGAM_64):
         return machofile(file, arch, list(initial_rpaths_transitive))
@@ -1046,7 +1021,7 @@ def codefile_class(filename, skip_symlinks=False):
     if not os.path.exists(filename) or os.path.getsize(filename) < 4:
         return None
     with open(filename, "rb") as file:
-        (magic,) = struct.unpack(BIG_ENDIAN + "L", file.read(4))
+        (magic,) = struct.unpack(f"{BIG_ENDIAN}L", file.read(4))
         file.seek(0)
         if magic in (FAT_MAGIC, MH_MAGIC, MH_CIGAM, MH_CIGAM_64):
             return machofile
@@ -1057,17 +1032,13 @@ def codefile_class(filename, skip_symlinks=False):
 
 def is_codefile(filename, skip_symlinks=True):
     klass = codefile_class(filename, skip_symlinks=skip_symlinks)
-    if not klass:
-        return False
-    return True
+    return bool(klass)
 
 
 def codefile_type(filename, skip_symlinks=True):
     "Returns None, 'machofile' or 'elffile'"
     klass = codefile_class(filename, skip_symlinks=skip_symlinks)
-    if not klass:
-        return None
-    return klass.__name__
+    return None if not klass else klass.__name__
 
 
 def _trim_sysroot(sysroot):
@@ -1144,11 +1115,10 @@ def inspect_rpaths(
                 )[0]
                 for rpath in cf.rpaths_nontransitive
             ]
+        if use_os_varnames:
+            return [cf.to_os_varnames(rpath) for rpath in cf.rpaths_nontransitive]
         else:
-            if use_os_varnames:
-                return [cf.to_os_varnames(rpath) for rpath in cf.rpaths_nontransitive]
-            else:
-                return cf.rpaths_nontransitive
+            return cf.rpaths_nontransitive
 
 
 def get_runpaths(filename, arch="native"):
@@ -1198,8 +1168,7 @@ def inspect_linkages_otool(filename, arch="native"):
         args.extend(["-arch", os.uname()[4]])
     args.extend(["-L", filename])
     result = check_output(args).decode(encoding="ascii")
-    groups = re.findall(r"^\t(.*) \(compatibility", result, re.MULTILINE)
-    return groups
+    return re.findall(r"^\t(.*) \(compatibility", result, re.MULTILINE)
 
 
 # TODO :: Consider allowing QEMU/binfmt_misc to run foreign binaries + passing a sysroot here?
@@ -1210,10 +1179,11 @@ def inspect_linkages_ldd(filename):
     result, err = process.communicate()
     result = result.decode(encoding="ascii")
     err = err.decode(encoding="ascii")
-    groups = re.findall(
-        r"^\t(?!linux-gate\.so\.1.*$)[^ ]+ => (.*) \([0-9a-fx]+\)", result, re.MULTILINE
+    return re.findall(
+        r"^\t(?!linux-gate\.so\.1.*$)[^ ]+ => (.*) \([0-9a-fx]+\)",
+        result,
+        re.MULTILINE,
     )
-    return groups
 
 
 def otool(*args):
@@ -1230,9 +1200,7 @@ def otool(*args):
             args.filename, resolve_filenames=False, recurse=False, arch=args.arch_type
         )
         print(
-            "Shared libs used (non-recursively) by {} are:\n{}".format(
-                args.filename, shared_libs
-            )
+            f"Shared libs used (non-recursively) by {args.filename} are:\n{shared_libs}"
         )
         return 0
     return 1
@@ -1241,13 +1209,11 @@ def otool(*args):
 def otool_sys(*args):
     import subprocess
 
-    result = subprocess.check_output("/usr/bin/otool", args).decode(encoding="ascii")
-    return result
+    return subprocess.check_output("/usr/bin/otool", args).decode(encoding="ascii")
 
 
 def ldd_sys(*args):
-    result = []
-    return result
+    return []
 
 
 def ldd(*args):
@@ -1262,17 +1228,13 @@ def ldd(*args):
         shared_libs = inspect_linkages(
             args.filename, resolve_filenames=False, recurse=True
         )
-        print(
-            "Shared libs used (recursively) by {} are:\n{}".format(
-                args.filename, shared_libs
-            )
-        )
+        print(f"Shared libs used (recursively) by {args.filename} are:\n{shared_libs}")
         return 0
     return 1
 
 
 def main(argv):
-    for idx, progname in enumerate(argv[0:2][::-1]):
+    for idx, progname in enumerate(argv[:2][::-1]):
         if re.match(r".*ldd(?:$|\.exe|\.py)", progname):
             return ldd(*argv[2 - idx :])
         elif re.match(r".*otool(?:$|\.exe|\.py)", progname):
@@ -1289,70 +1251,61 @@ def main(argv):
 
 
 def main_maybe_test():
-    if sys.argv[1] == "test":
-        import functools
+    if sys.argv[1] != "test":
+        return main(sys.argv)
+    import functools
 
-        tool = sys.argv[2]
-        if tool != "otool" and tool != "ldd":
-            if sys.platform == "darwin":
-                tool = "otool"
-            else:
-                tool = "ldd"
-        test_that = None
-        sysroot_args = [
-            re.match("--sysroot=([^ ]+)", arg)
-            for arg in sys.argv
-            if re.match("--sysroot=([^ ]+)", arg)
-        ]
-        if len(sysroot_args):
-            (sysroot,) = sysroot_args[-1].groups(1)
-            sysroot = os.path.expanduser(sysroot)
-        else:
-            sysroot = ""
-        if tool == "otool":
-            test_this = functools.partial(
-                inspect_linkages,
-                sysroot=sysroot,
-                resolve_filenames=False,
-                recurse=False,
-            )
-            if sys.platform == "darwin":
-                test_that = functools.partial(inspect_linkages_otool)
-            SOEXT = "dylib"
-        elif tool == "ldd":
-            test_this = functools.partial(
-                inspect_linkages, sysroot=sysroot, resolve_filenames=True, recurse=True
-            )
-            if sys.platform.startswith("linux"):
-                test_that = functools.partial(inspect_linkages_ldd)
-            SOEXT = "so"
+    tool = sys.argv[2]
+    if tool not in ["otool", "ldd"]:
+        tool = "otool" if sys.platform == "darwin" else "ldd"
+    test_that = None
+    sysroot_args = [
+        re.match("--sysroot=([^ ]+)", arg)
+        for arg in sys.argv
+        if re.match("--sysroot=([^ ]+)", arg)
+    ]
+    if len(sysroot_args):
+        (sysroot,) = sysroot_args[-1].groups(1)
+        sysroot = os.path.expanduser(sysroot)
+    else:
+        sysroot = ""
+    if tool == "ldd":
+        test_this = functools.partial(
+            inspect_linkages, sysroot=sysroot, resolve_filenames=True, recurse=True
+        )
+        if sys.platform.startswith("linux"):
+            test_that = functools.partial(inspect_linkages_ldd)
+        SOEXT = "so"
+    elif tool == "otool":
+        test_this = functools.partial(
+            inspect_linkages,
+            sysroot=sysroot,
+            resolve_filenames=False,
+            recurse=False,
+        )
+        if sys.platform == "darwin":
+            test_that = functools.partial(inspect_linkages_otool)
+        SOEXT = "dylib"
         # Find a load of dylibs or elfs and compare
         # the output against 'otool -L' or 'ldd'
         # codefiles = glob.glob('/usr/lib/*.'+SOEXT)
-        codefiles = glob.glob(sysroot + "/usr/lib/*." + SOEXT)
-        # codefiles = ['/usr/bin/file']
-        # Sometimes files do not exist:
-        # (/usr/lib/libgutenprint.2.dylib -> libgutenprint.2.0.3.dylib)
-        codefiles = [
-            codefile
-            for codefile in codefiles
-            if not os.path.islink(codefile) or os.path.exists(os.readlink(codefile))
-        ]
-        for codefile in codefiles:
-            print(f"\nchecking {codefile}")
-            this = test_this(codefile)
-            if test_that:
-                that = test_that(codefile)
-            else:
-                that = this
-            print("\n".join(this))
-            assert set(this) == set(
-                that
-            ), "py-ldd result incorrect for {}, this:\n{}\nvs that:\n{}".format(
-                codefile, set(this), set(that)
-            )
-    else:
-        return main(sys.argv)
+    codefiles = glob.glob(f"{sysroot}/usr/lib/*.{SOEXT}")
+    # codefiles = ['/usr/bin/file']
+    # Sometimes files do not exist:
+    # (/usr/lib/libgutenprint.2.dylib -> libgutenprint.2.0.3.dylib)
+    codefiles = [
+        codefile
+        for codefile in codefiles
+        if not os.path.islink(codefile) or os.path.exists(os.readlink(codefile))
+    ]
+    for codefile in codefiles:
+        print(f"\nchecking {codefile}")
+        this = test_this(codefile)
+        that = test_that(codefile) if test_that else this
+        print("\n".join(this))
+        assert set(this) == set(
+            that
+        ), f"py-ldd result incorrect for {codefile}, this:\n{set(this)}\nvs that:\n{set(that)}"
 
 
 if __name__ == "__main__":

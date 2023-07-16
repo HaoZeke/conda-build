@@ -172,7 +172,7 @@ def package_exists(package_name):
 
 def getval(spec, k):
     if k not in spec:
-        raise Exception("Required key %s not in spec" % k)
+        raise Exception(f"Required key {k} not in spec")
     else:
         return spec[k]
 
@@ -182,7 +182,7 @@ def warn_against_branches(branch):
     print("=========================================")
     print("")
     print("WARNING:")
-    print("Building a rock referenced to branch %s." % branch)
+    print(f"Building a rock referenced to branch {branch}.")
     print("This is not a tag. This is dangerous, because rebuilding")
     print("at a later date may produce a different package.")
     print("Please replace with a tag, git commit, or tarball.")
@@ -193,11 +193,8 @@ def warn_against_branches(branch):
 def format_dep(dep):
     name_without_ver = "".join([c for c in dep if c.isalpha()])
     if name_without_ver not in ["lua"]:
-        # Enforce conda naming convention.
-        # lower case, no white-space, and prepended "lua-"
-        # (all languages other than Python prepend their language to package names)
         if dep[:4] != "lua-":
-            dep = "lua-" + dep
+            dep = f"lua-{dep}"
     dep = dep.replace(" ", "").lower()
 
     # Ensure a space between the first special-character that specifies version logic
@@ -205,7 +202,7 @@ def format_dep(dep):
     special_char_test = [c in "<>=~" for c in dep]
     for i, v in enumerate(special_char_test):
         if v:
-            split_dep = [c for c in dep]
+            split_dep = list(dep)
             split_dep.insert(i, " ")
             dep = "".join(split_dep)
             break
@@ -246,7 +243,9 @@ def skeletonize(packages, output_dir=".", version=None, recursive=False):
         package = packages.pop()
 
         packagename = (
-            "lua-%s" % package.lower() if package[:4] != "lua-" else package.lower()
+            f"lua-{package.lower()}"
+            if package[:4] != "lua-"
+            else package.lower()
         )
         d = package_dicts.setdefault(
             package,
@@ -283,7 +282,7 @@ def skeletonize(packages, output_dir=".", version=None, recursive=False):
             raise Exception(f"Could not download rockspec for {package}")
 
         # Find the downloaded rockspec
-        fs = glob(package + "*.rockspec")
+        fs = glob(f"{package}*.rockspec")
         if len(fs) != 1:
             raise Exception("Failed to download rockspec")
         d["rockspec_file"] = fs[0]
@@ -371,7 +370,7 @@ def skeletonize(packages, output_dir=".", version=None, recursive=False):
     # If we didn't find any modules to import, import the base name
     if d["test_commands"] == "":
         d["test_commands"] = INDENT.join(
-            [""] + ["""lua -e "require '%s'" """ % d["rockname"]]
+            [""] + [f"""lua -e "require '{d["rockname"]}'" """]
         )
 
     # Build the luarocks skeleton

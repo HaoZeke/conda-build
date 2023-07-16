@@ -62,7 +62,7 @@ def is_macho(path):
         return False
     with open(path, "rb") as fi:
         head = fi.read(4)
-    return bool(head in MAGIC)
+    return head in MAGIC
 
 
 def is_dylib(path, build_prefix):
@@ -75,8 +75,7 @@ def human_filetype(path, build_prefix):
     lines = output.splitlines()
     if not lines[0].startswith((path, "Mach header")):
         raise ValueError(
-            "Expected `otool -h` output to start with"
-            " Mach header or {}, got:\n{}".format(path, output)
+            f"Expected `otool -h` output to start with Mach header or {path}, got:\n{output}"
         )
     assert lines[0].startswith((path, "Mach header")), path
 
@@ -89,27 +88,19 @@ def human_filetype(path, build_prefix):
 
 def is_dylib_info(lines):
     dylib_info = ("LC_ID_DYLIB", "LC_LOAD_DYLIB")
-    if len(lines) > 1 and lines[1].split()[1] in dylib_info:
-        return True
-    return False
+    return len(lines) > 1 and lines[1].split()[1] in dylib_info
 
 
 def is_id_dylib(lines):
-    if len(lines) > 1 and lines[1].split()[1] == "LC_ID_DYLIB":
-        return True
-    return False
+    return len(lines) > 1 and lines[1].split()[1] == "LC_ID_DYLIB"
 
 
 def is_load_dylib(lines):
-    if len(lines) > 1 and lines[1].split()[1] == "LC_LOAD_DYLIB":
-        return True
-    return False
+    return len(lines) > 1 and lines[1].split()[1] == "LC_LOAD_DYLIB"
 
 
 def is_rpath(lines):
-    if len(lines) > 1 and lines[1].split()[1] == "LC_RPATH":
-        return True
-    return False
+    return len(lines) > 1 and lines[1].split()[1] == "LC_RPATH"
 
 
 def _get_load_commands(lines):
@@ -141,20 +132,20 @@ def _get_matching_load_commands(lines, cb_filter):
                 # is fairly simple so let's just hardcode it for speed.
                 if len(listy) == 2:
                     key, value = listy
-                elif listy[0] == "name" or listy[0] == "path":
+                elif listy[0] in ["name", "path"]:
                     # Create an entry for 'name offset' if there is one
                     # as that can be useful if we need to know if there
                     # is space to patch it for relocation purposes.
                     if listy[2] == "(offset":
-                        key = listy[0] + " offset"
+                        key = f"{listy[0]} offset"
                         value = int(listy[3][:-1])
                         lcdict[key] = value
-                    key, value = listy[0:2]
+                    key, value = listy[:2]
                 elif listy[0] == "time":
-                    key = " ".join(listy[0:3])
+                    key = " ".join(listy[:3])
                     value = " ".join(listy[3:])
                 elif listy[0] in ("current", "compatibility"):
-                    key = " ".join(listy[0:2])
+                    key = " ".join(listy[:2])
                     value = listy[2]
                 try:
                     value = int(value)
@@ -183,8 +174,7 @@ def find_apple_cctools_executable(name, build_prefix, nofail=False):
                     except Exception as e:
                         log = utils.get_logger(__name__)
                         log.error(
-                            "ERROR :: Found `{}` but is is an Apple Xcode stub executable\n"
-                            "and it returned an error:\n{}".format(tool, e.output)
+                            f"ERROR :: Found `{tool}` but is is an Apple Xcode stub executable\nand it returned an error:\n{e.output}"
                         )
                         raise e
                     tool = tool_xcr
@@ -192,10 +182,7 @@ def find_apple_cctools_executable(name, build_prefix, nofail=False):
                         return tool
         except Exception as _:  # noqa
             print(
-                "ERROR :: Failed to run `{}`.  Please use `conda` to install `cctools` into your base environment.\n"
-                "         An option on macOS is to install `Xcode` or `Command Line Tools for Xcode`.".format(
-                    tool
-                )
+                f"ERROR :: Failed to run `{tool}`.  Please use `conda` to install `cctools` into your base environment.\n         An option on macOS is to install `Xcode` or `Command Line Tools for Xcode`."
             )
             sys.exit(1)
         return tool
@@ -329,8 +316,7 @@ def install_name_change(path, build_prefix, cb_func, dylibs, verbose=False):
 
     changes = []
     for index, dylib in enumerate(dylibs):
-        new_name = cb_func(path, dylib)
-        if new_name:
+        if new_name := cb_func(path, dylib):
             changes.append((index, new_name))
 
     ret = True
@@ -342,7 +328,7 @@ def install_name_change(path, build_prefix, cb_func, dylibs, verbose=False):
             args.extend(("-change", dylibs[index]["name"], new_name, path))
         code, _, stderr = install_name_tool(args, build_prefix)
         if "Mach-O dynamic shared library stub file" in stderr:
-            print("Skipping Mach-O dynamic shared library stub file %s" % path)
+            print(f"Skipping Mach-O dynamic shared library stub file {path}")
             ret = False
             continue
         else:

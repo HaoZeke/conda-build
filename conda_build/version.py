@@ -51,7 +51,7 @@ def _parse(version: str) -> Union["_LegacyVersion", "Version"]:
 
 class _LegacyVersion(_BaseVersion):
     def __init__(self, version: str) -> None:
-        self._version = str(version)
+        self._version = version
         self._key = _legacy_cmpkey(self._version)
 
     def __str__(self) -> str:
@@ -127,7 +127,7 @@ def _parse_version_parts(s: str) -> Iterator[str]:
             # pad for numeric comparison
             yield part.zfill(8)
         else:
-            yield "*" + part
+            yield f"*{part}"
 
     # ensure that alpha/beta/candidate are before final
     yield "*final"

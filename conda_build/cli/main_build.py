@@ -556,9 +556,8 @@ def execute(args):
             except:
                 if not args.keep_going:
                     raise
-                else:
-                    failed_recipes.append(recipe)
-                    continue
+                failed_recipes.append(recipe)
+                continue
         if failed_recipes:
             print("Failed recipes:")
             dashlist(failed_recipes)
@@ -592,12 +591,11 @@ def main():
     try:
         execute(sys.argv[1:])
     except RuntimeError as e:
-        print(str(e))
+        print(e)
         sys.exit(1)
     except filelock.Timeout as e:
         print(
-            "File lock on {} could not be obtained.  You might need to try fewer builds at once."
-            "  Otherwise, run conda clean --lock".format(e.lock_file)
+            f"File lock on {e.lock_file} could not be obtained.  You might need to try fewer builds at once.  Otherwise, run conda clean --lock"
         )
         sys.exit(1)
     return

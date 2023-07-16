@@ -61,12 +61,12 @@ def fix_staged_scripts(scripts_dir, config):
                 "and adding a .bat file for it" % fn
             )
             # copy it with a .py extension (skipping that first #! line)
-            with open(join(scripts_dir, fn + "-script.py"), "wb") as fo:
+            with open(join(scripts_dir, f"{fn}-script.py"), "wb") as fo:
                 fo.write(f.read())
             # now create the .exe file
             copy_into(
-                join(dirname(__file__), "cli-%s.exe" % config.host_arch),
-                join(scripts_dir, fn + ".exe"),
+                join(dirname(__file__), f"cli-{config.host_arch}.exe"),
+                join(scripts_dir, f"{fn}.exe"),
             )
 
         # remove the original script
@@ -80,11 +80,9 @@ def build_vcvarsall_vs_path(version):
     Expected versions are of the form {9.0, 10.0, 12.0, 14.0}
     """
     # Set up a load of paths that can be imported from the tests
-    if "ProgramFiles(x86)" in os.environ:
-        PROGRAM_FILES_PATH = os.environ["ProgramFiles(x86)"]
-    else:
-        PROGRAM_FILES_PATH = os.environ["ProgramFiles"]
-
+    PROGRAM_FILES_PATH = os.environ.get(
+        "ProgramFiles(x86)", os.environ["ProgramFiles"]
+    )
     flatversion = str(version).replace(".", "")
     vstools = f"VS{flatversion}COMNTOOLS"
 
@@ -268,8 +266,8 @@ def write_build_scripts(m, env, bld_bat):
             )
         # Reset echo on, because MSVC scripts might have turned it off
         fo.write("@echo on\n")
-        fo.write('set "INCLUDE={};%INCLUDE%"\n'.format(env["LIBRARY_INC"]))
-        fo.write('set "LIB={};%LIB%"\n'.format(env["LIBRARY_LIB"]))
+        fo.write(f'set "INCLUDE={env["LIBRARY_INC"]};%INCLUDE%"\n')
+        fo.write(f'set "LIB={env["LIBRARY_LIB"]};%LIB%"\n')
         if m.config.activate and m.name() != "conda":
             write_bat_activation_text(fo, m)
     # bld_bat may have been generated elsewhere with contents of build/script
@@ -322,7 +320,7 @@ def build(m, bld_bat, stats, provision_only=False):
     env.update(set_language_env_vars(m.config.variant))
 
     for name in "BIN", "INC", "LIB":
-        path = env["LIBRARY_" + name]
+        path = env[f"LIBRARY_{name}"]
         if not isdir(path):
             os.makedirs(path)
 
@@ -337,7 +335,7 @@ def build(m, bld_bat, stats, provision_only=False):
             rewrite_env = {
                 k: env[k] for k in ["PREFIX", "BUILD_PREFIX", "SRC_DIR"] if k in env
             }
-            print("Rewriting env in output: %s" % pprint.pformat(rewrite_env))
+            print(f"Rewriting env in output: {pprint.pformat(rewrite_env)}")
         check_call_env(
             cmd, cwd=m.config.work_dir, stats=stats, rewrite_stdout_env=rewrite_env
         )

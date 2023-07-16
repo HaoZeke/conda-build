@@ -90,10 +90,7 @@ class TarCheck:
             self.config.host_subdir,
             "noarch",
             self.config.target_subdir,
-        ], (
-            "Inconsistent subdir in package - index.json expecting {},"
-            " got {}".format(self.config.host_subdir, info["subdir"])
-        )
+        ], f'Inconsistent subdir in package - index.json expecting {self.config.host_subdir}, got {info["subdir"]}'
 
 
 def check_all(path, config):

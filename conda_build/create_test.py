@@ -43,7 +43,7 @@ def _get_output_script_name(
     #   They do not automatically pick up run_test.*, but can be pointed at that explicitly.
 
     ext = ".bat" if win_status else ".sh"
-    dst_name = "run_test" + ext
+    dst_name = f"run_test{ext}"
     src_name = dst_name
     if m.is_output:
         src_name = "no-file"
@@ -71,8 +71,7 @@ def create_shell_files(m: MetaData, test_dir: os.PathLike) -> list[str]:
                 m.config.timeout,
                 locking=False,
             )
-        commands = ensure_list(m.get_value("test/commands", []))
-        if commands:
+        if commands := ensure_list(m.get_value("test/commands", [])):
             with open(join(dest_file), "a") as f:
                 f.write("\n\n")
                 if not status:
@@ -98,7 +97,7 @@ def _create_test_files(
     ext: str,
     comment_char: str = "# ",
 ) -> tuple[os.PathLike, bool]:
-    name = "run_test" + ext
+    name = f"run_test{ext}"
     if m.is_output:
         name = ""
         # the way this works is that each output needs to explicitly define a test script to run
@@ -110,7 +109,7 @@ def _create_test_files(
                     name = out_test_script
                     break
 
-    out_file = join(test_dir, "run_test" + ext)
+    out_file = join(test_dir, f"run_test{ext}")
     if name:
         test_file = join(m.path, name)
         if isfile(test_file):
@@ -147,9 +146,11 @@ def create_py_files(m: MetaData, test_dir: os.PathLike) -> bool:
     likely_r_pkg = pkg_name.startswith("r-")
     likely_lua_pkg = pkg_name.startswith("lua-")
     likely_perl_pkg = pkg_name.startswith("perl-")
-    likely_non_python_pkg = likely_r_pkg or likely_lua_pkg or likely_perl_pkg
-
-    if likely_non_python_pkg:
+    if (
+        likely_non_python_pkg := likely_r_pkg
+        or likely_lua_pkg
+        or likely_perl_pkg
+    ):
         imports = []
         for import_item in ensure_list(m.get_value("test/imports", [])):
             # add any imports specifically marked as python
@@ -221,7 +222,7 @@ def create_pl_files(m: MetaData, test_dir: os.PathLike) -> bool:
                 break
     if tf_exists or imports:
         with open(tf, "a") as fo:
-            print(r'my $expected_version = "%s";' % m.version().rstrip("0"), file=fo)
+            print(f'my $expected_version = "{m.version().rstrip("0")}";', file=fo)
             if imports:
                 for name in imports:
                     print(r'print("import: %s\n");' % name, file=fo)
@@ -275,8 +276,7 @@ def create_all_test_files(
         # this happens when we're finishing the build
         rm_rf(test_dir)
         os.makedirs(test_dir, exist_ok=True)
-        test_requires = ensure_list(m.get_value("test/requires", []))
-        if test_requires:
+        if test_requires := ensure_list(m.get_value("test/requires", [])):
             Path(test_dir, "test_time_dependencies.json").write_text(
                 json.dumps(test_requires)
             )

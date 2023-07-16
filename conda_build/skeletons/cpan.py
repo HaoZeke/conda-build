@@ -213,25 +213,26 @@ def get_build_dependencies_from_src_archive(package_url, sha256, src_cache):
     result = []
     with tarfile.open(cached_path) as tf:
         need_f = any(
-            [
-                f.name.lower().endswith((".f", ".f90", ".f77", ".f95", ".f03"))
-                for f in tf
-            ]
+            f.name.lower().endswith((".f", ".f90", ".f77", ".f95", ".f03"))
+            for f in tf
         )
         # Fortran builds use CC to perform the link (they do not call the linker directly).
         need_c = (
             True
             if need_f
-            else any([f.name.lower().endswith((".c", ".xs")) for f in tf])
+            else any(f.name.lower().endswith((".c", ".xs")) for f in tf)
         )
         need_cxx = any(
-            [f.name.lower().endswith((".cxx", ".cpp", ".cc", ".c++")) for f in tf]
+            f.name.lower().endswith((".cxx", ".cpp", ".cc", ".c++"))
+            for f in tf
         )
-        need_autotools = any([f.name.lower().endswith("/configure") for f in tf])
+        need_autotools = any(f.name.lower().endswith("/configure") for f in tf)
         need_make = (
             True
             if any((need_autotools, need_f, need_cxx, need_c))
-            else any([f.name.lower().endswith(("/makefile", "/makevars")) for f in tf])
+            else any(
+                f.name.lower().endswith(("/makefile", "/makevars")) for f in tf
+            )
         )
         if need_c or need_cxx or need_f:
             result.append("{{ compiler('c') }}")
@@ -240,13 +241,16 @@ def get_build_dependencies_from_src_archive(package_url, sha256, src_cache):
         if need_f:
             result.append("{{ compiler('fortran') }}")
         if need_autotools:
-            result.append("autoconf  # [not win]")
-            result.append("automake  # [not win]")
-            result.append("m2-autoconf  # [win]")
-            result.append("m2-automake-wrapper  # [win]")
+            result.extend(
+                (
+                    "autoconf  # [not win]",
+                    "automake  # [not win]",
+                    "m2-autoconf  # [win]",
+                    "m2-automake-wrapper  # [win]",
+                )
+            )
         if need_make:
-            result.append("make  # [not win]")
-            result.append("m2-make  # [win]")
+            result.extend(("make  # [not win]", "m2-make  # [win]"))
     print(
         f"INFO :: For {os.path.basename(package_url)}, we need the following build tools:\n{result}"
     )
@@ -293,17 +297,17 @@ def md5d_file_and_other(filename, other_hashed):
     sha1 = hashlib.md5()
     with open(filename, "rb") as f:
         while True:
-            data = f.read(65536)
-            if not data:
+            if data := f.read(65536):
+                sha1.update(data)
+            else:
                 break
-            sha1.update(data)
     for other in other_hashed:
         sha1.update(other.encode("utf-8") if hasattr(other, "encode") else other)
     return sha1.hexdigest()
 
 
 def get_pickle_file_path(cache_dir, filename_prefix, other_hashed=()):
-    h = "h" + md5d_file_and_other(__file__, other_hashed)[2:10]
+    h = f"h{md5d_file_and_other(__file__, other_hashed)[2:10]}"
     return os.path.join(cache_dir, filename_prefix.replace("::", "-") + "." + h + ".p")
 
 
@@ -363,18 +367,15 @@ def install_perl_get_core_modules(version):
             ]
             from subprocess import check_output
 
-            all_core_modules = (
+            return (
                 check_output(args, shell=False)
                 .decode("utf-8")
                 .replace("\r\n", "\n")
                 .split("\n")
             )
-            return all_core_modules
     except Exception as e:
         print(
-            "Failed to query perl={} for core modules list, attempted command was:\n{}".format(
-                version, " ".join(args)
-            )
+            f'Failed to query perl={version} for core modules list, attempted command was:\n{" ".join(args)}'
         )
         print(e.message)
 

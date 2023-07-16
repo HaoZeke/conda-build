@@ -307,7 +307,7 @@ class Config:
                     lang = "npy"
                 elif lang == "r_base":
                     lang = "r"
-                var = "CONDA_" + lang.upper()
+                var = f"CONDA_{lang.upper()}"
                 version = os.getenv(var) if os.getenv(var) else default
             elif isinstance(version, list) and len(version) == 1:
                 version = version[0]
@@ -410,7 +410,7 @@ class Config:
         return self.host_platform == "noarch"
 
     def reset_platform(self):
-        if not self.platform == cc_platform:
+        if self.platform != cc_platform:
             self.platform = cc_platform
 
     @property
@@ -455,9 +455,7 @@ class Config:
 
     @property
     def exclusive_config_file(self):
-        if self.exclusive_config_files:
-            return self.exclusive_config_files[0]
-        return None
+        return self.exclusive_config_files[0] if self.exclusive_config_files else None
 
     @exclusive_config_file.setter
     def exclusive_config_file(self, value):
@@ -466,10 +464,7 @@ class Config:
                 "Cannot set singular exclusive_config_file "
                 "if multiple exclusive_config_files are present."
             )
-        if value is None:
-            self.exclusive_config_files = []
-        else:
-            self.exclusive_config_files = [value]
+        self.exclusive_config_files = [] if value is None else [value]
 
     @property
     def src_cache_root(self):
@@ -573,30 +568,30 @@ class Config:
         if platform.startswith("win") or (
             platform == "noarch" and sys.platform == "win32"
         ):
-            if os.path.isfile(os.path.join(prefix, "python_d.exe")):
-                res = join(prefix, "python_d.exe")
-            else:
-                res = join(prefix, "python.exe")
+            return (
+                join(prefix, "python_d.exe")
+                if os.path.isfile(os.path.join(prefix, "python_d.exe"))
+                else join(prefix, "python.exe")
+            )
         else:
-            res = join(prefix, "bin/python")
-        return res
+            return join(prefix, "bin/python")
 
     def _get_perl(self, prefix, platform):
-        if platform.startswith("win"):
-            res = join(prefix, "Library", "bin", "perl.exe")
-        else:
-            res = join(prefix, "bin/perl")
-        return res
+        return (
+            join(prefix, "Library", "bin", "perl.exe")
+            if platform.startswith("win")
+            else join(prefix, "bin/perl")
+        )
 
     # TODO: This is probably broken on Windows, but no one has a lua package on windows to test.
     def _get_lua(self, prefix, platform):
         lua_ver = self.variant.get("lua", get_default_variant(self)["lua"])
         binary_name = "luajit" if (lua_ver and lua_ver[0] == "2") else "lua"
-        if platform.startswith("win"):
-            res = join(prefix, "Library", "bin", f"{binary_name}.exe")
-        else:
-            res = join(prefix, f"bin/{binary_name}")
-        return res
+        return (
+            join(prefix, "Library", "bin", f"{binary_name}.exe")
+            if platform.startswith("win")
+            else join(prefix, f"bin/{binary_name}")
+        )
 
     def _get_r(self, prefix, platform):
         if platform.startswith("win") or (
@@ -621,23 +616,22 @@ class Config:
         return res
 
     def compute_build_id(self, package_name, package_version="0", reset=False):
-        time_re = r"([_-])([0-9]{13})"
         pat_dict = {"n": package_name, "v": str(package_version), "t": "{t}"}
         # Use the most recent build with matching recipe name, or else the recipe name.
         build_folders = []
-        if not self.dirty:
-            if reset:
-                set_invocation_time()
-        else:
+        if self.dirty:
             old_build_id_t = self.build_id_pat if self.build_id_pat else "{n}-{v}_{t}"
             old_build_id_t = old_build_id_t.format(**pat_dict)
             build_folders_all = get_build_folders(self.croot)
+            time_re = r"([_-])([0-9]{13})"
             for folder_full in build_folders_all:
                 folder = os.path.basename(folder_full)
                 untimed_folder = re.sub(time_re, r"\g<1>{t}", folder, flags=re.UNICODE)
                 if untimed_folder == old_build_id_t:
                     build_folders.append(folder_full)
             prev_build_id = None
+        elif reset:
+            set_invocation_time()
         if build_folders:
             # Use the most recent build with matching recipe name
             prev_build_id = os.path.basename(build_folders[-1])
@@ -709,19 +703,17 @@ class Config:
         """The temporary folder where the build environment is created.  The build env contains
         libraries that may be linked, but only if the host env is not specified.  It is placed on
         PATH."""
-        if self._merge_build_host:
-            prefix = self.host_prefix
-        else:
-            prefix = join(self.build_folder, "_build_env")
-        return prefix
+        return (
+            self.host_prefix
+            if self._merge_build_host
+            else join(self.build_folder, "_build_env")
+        )
 
     @property
     def host_prefix(self):
         """The temporary folder where the host environment is created.  The host env contains
         libraries that may be linked.  It is not placed on PATH."""
-        if on_win:
-            return self._short_host_prefix
-        return self._long_host_prefix
+        return self._short_host_prefix if on_win else self._long_host_prefix
 
     @property
     def _short_test_prefix(self):
@@ -937,12 +929,7 @@ class Config:
 
 def get_or_merge_config(config, variant=None, **kwargs):
     """Always returns a new object - never changes the config that might be passed in."""
-    if not config:
-        config = Config(variant=variant)
-    else:
-        # decouple this config from whatever was fed in.  People must change config by
-        #    accessing and changing this attribute.
-        config = config.copy()
+    config = Config(variant=variant) if not config else config.copy()
     if kwargs:
         config.set_keys(**kwargs)
     if variant:

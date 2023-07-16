@@ -84,7 +84,7 @@ def get_npy_ver(config):
     # Convert int -> string, e.g.
     #   17 -> '1.7'
     #   110 -> '1.10'
-    return conda_npy[0] + "." + conda_npy[1:]
+    return f"{conda_npy[0]}.{conda_npy[1:]}"
 
 
 def get_lua_include_dir(config):
@@ -170,8 +170,8 @@ def verify_git_repo(
         # metadata git_url or git_rev, then we aren't looking at the right source.
         if not os.path.isdir(remote_url) and remote_url.lower() != git_url.lower():
             log.debug("remote does not match git_url")
-            log.debug("Remote: " + remote_url.lower())
-            log.debug("git_url: " + git_url.lower())
+            log.debug(f"Remote: {remote_url.lower()}")
+            log.debug(f"git_url: {git_url.lower()}")
             OK = False
     except subprocess.CalledProcessError as error:
         log.debug("Error obtaining git information in verify_git_repo.  Error was: ")
@@ -212,7 +212,7 @@ def get_git_info(git_exe, repo, debug):
         output = output.decode("utf-8")
         parts = output.rsplit("-", 2)
         if len(parts) == 3:
-            d.update(dict(zip(keys, parts)))
+            d |= dict(zip(keys, parts))
         d["GIT_DESCRIBE_TAG_PEP440"] = str(get_version_from_git_tag(output))
     except subprocess.CalledProcessError:
         msg = (
@@ -259,12 +259,10 @@ def get_git_info(git_exe, repo, debug):
 
     # set up the build string
     if "GIT_DESCRIBE_NUMBER" in d and "GIT_DESCRIBE_HASH" in d:
-        d["GIT_BUILD_STR"] = "{}_{}".format(
-            d["GIT_DESCRIBE_NUMBER"], d["GIT_DESCRIBE_HASH"]
-        )
+        d["GIT_BUILD_STR"] = f'{d["GIT_DESCRIBE_NUMBER"]}_{d["GIT_DESCRIBE_HASH"]}'
 
     # issues on Windows with the next line of the command prompt being recorded here.
-    assert not any("\n" in value for value in d.values())
+    assert all("\n" not in value for value in d.values())
     return d
 
 
@@ -293,7 +291,7 @@ def get_hg_build_info(repo):
     d["HG_NUM_ID"] = rev
     d["HG_LATEST_TAG_DISTANCE"] = distance
     d["HG_SHORT_ID"] = short_id
-    d["HG_BUILD_STR"] = "{}_{}".format(d["HG_NUM_ID"], d["HG_SHORT_ID"])
+    d["HG_BUILD_STR"] = f'{d["HG_NUM_ID"]}_{d["HG_SHORT_ID"]}'
     return d
 
 
@@ -393,12 +391,7 @@ def python_vars(metadata, prefix, escape_backslash):
         if utils.on_win and escape_backslash:
             python_bin = python_bin.replace("\\", "\\\\")
 
-        vars_.update(
-            {
-                # host prefix is always fine, because it is the same as build when is_cross is False
-                "PYTHON": python_bin,
-            }
-        )
+        vars_["PYTHON"] = python_bin
 
     np_ver = metadata.config.variant.get(
         "numpy", get_default_variant(metadata.config)["numpy"]
@@ -422,12 +415,7 @@ def perl_vars(metadata, prefix, escape_backslash):
         if utils.on_win and escape_backslash:
             perl_bin = perl_bin.replace("\\", "\\\\")
 
-        vars_.update(
-            {
-                # host prefix is always fine, because it is the same as build when is_cross is False
-                "PERL": perl_bin,
-            }
-        )
+        vars_["PERL"] = perl_bin
     return vars_
 
 
@@ -446,12 +434,10 @@ def lua_vars(metadata, prefix, escape_backslash):
             lua_bin = lua_bin.replace("\\", "\\\\")
             lua_include_dir = lua_include_dir.replace("\\", "\\\\")
 
-        vars_.update(
-            {
-                "LUA": lua_bin,
-                "LUA_INCLUDE_DIR": lua_include_dir,
-            }
-        )
+        vars_ |= {
+            "LUA": lua_bin,
+            "LUA_INCLUDE_DIR": lua_include_dir,
+        }
     return vars_
 
 
@@ -474,12 +460,10 @@ def r_vars(metadata, prefix, escape_backslash):
         if utils.on_win and escape_backslash:
             r_bin = r_bin.replace("\\", "\\\\")
 
-        vars_.update(
-            {
-                "R": r_bin,
-                "R_USER": r_user,
-            }
-        )
+        vars_ |= {
+            "R": r_bin,
+            "R_USER": r_user,
+        }
     return vars_
 
 
@@ -492,7 +476,8 @@ def meta_vars(meta, skip_build_id=False):
             value = os.getenv(var_name)
         if value is None:
             warnings.warn(
-                "The environment variable '%s' is undefined." % var_name, UserWarning
+                f"The environment variable '{var_name}' is undefined.",
+                UserWarning,
             )
         else:
             d[var_name] = value
@@ -537,7 +522,7 @@ def meta_vars(meta, skip_build_id=False):
             )
 
         if _x or meta.get_value("source/0/path"):
-            d.update(get_git_info(git_exe, git_dir, meta.config.debug))
+            d |= get_git_info(git_exe, git_dir, meta.config.debug)
 
     elif external.find_executable("hg", meta.config.build_prefix) and os.path.exists(
         hg_dir
@@ -638,8 +623,8 @@ def windows_vars(m, get_default, prefix):
     get_default("PROCESSOR_ARCHITEW6432")
     get_default("PROCESSOR_ARCHITECTURE")
     get_default("PROCESSOR_IDENTIFIER")
-    get_default("BUILD", win_arch + "-pc-windows-" + win_msvc)
-    for k in os.environ.keys():
+    get_default("BUILD", f"{win_arch}-pc-windows-{win_msvc}")
+    for k in os.environ:
         if re.match("VS[0-9]{2,3}COMNTOOLS", k):
             get_default(k)
         elif re.match("VS[0-9]{4}INSTALLDIR", k):
@@ -718,8 +703,8 @@ def linux_vars(m, get_default, prefix):
     get_default("QEMU_UNAME")
     get_default("DEJAGNU")
     get_default("DISPLAY")
-    get_default("LD_RUN_PATH", prefix + "/lib")
-    get_default("BUILD", build_arch + "-conda_" + build_distro + "-linux-gnu")
+    get_default("LD_RUN_PATH", f"{prefix}/lib")
+    get_default("BUILD", f"{build_arch}-conda_{build_distro}-linux-gnu")
 
 
 def set_from_os_or_variant(out_dict, key, variant, default):
@@ -740,7 +725,7 @@ def system_vars(env_dict, m, prefix):
 
 
 def os_vars(m, prefix):
-    d = dict()
+    d = {}
     # note the dictionary is passed in here - variables are set in that dict if they are non-null
     get_default = lambda key, default="": set_from_os_or_variant(
         d, key, m.config.variant, default
@@ -787,11 +772,7 @@ def _load_all_json(path):
     dictionaries.
     """
     root, _, files = next(utils.walk(path))
-    result = {}
-    for f in files:
-        if f.endswith(".json"):
-            result[f] = _load_json(join(root, f))
-    return result
+    return {f: _load_json(join(root, f)) for f in files if f.endswith(".json")}
 
 
 class Environment:
@@ -854,16 +835,10 @@ def get_install_actions(
     specs = list(specs)
     if specs:
         specs.extend(create_default_packages)
-    if verbose or debug:
-        capture = contextlib.nullcontext
-        if debug:
-            conda_log_level = logging.DEBUG
-    else:
-        capture = utils.capture
-    for feature, value in feature_list:
-        if value:
-            specs.append("%s@" % feature)
-
+    capture = contextlib.nullcontext if verbose or debug else utils.capture
+    if debug:
+        conda_log_level = logging.DEBUG
+    specs.extend(f"{feature}@" for feature, value in feature_list if value)
     bldpkgs_dirs = ensure_list(bldpkgs_dirs)
 
     index, index_ts, _ = get_build_index(
@@ -1071,42 +1046,41 @@ def create_env(
                     )
                     or isinstance(exc, PaddingError)
                 ) and config.prefix_length > 80:
-                    if config.prefix_length_fallback:
-                        log.warn(
-                            "Build prefix failed with prefix length %d",
-                            config.prefix_length,
-                        )
-                        log.warn("Error was: ")
-                        log.warn(str(exc))
-                        log.warn(
-                            "One or more of your package dependencies needs to be rebuilt "
-                            "with a longer prefix length."
-                        )
-                        log.warn(
-                            "Falling back to legacy prefix length of 80 characters."
-                        )
-                        log.warn(
-                            "Your package will not install into prefixes > 80 characters."
-                        )
-                        config.prefix_length = 80
-
-                        host = "_h_env" in prefix
-                        # Set this here and use to create environ
-                        #   Setting this here is important because we use it below (symlink)
-                        prefix = config.host_prefix if host else config.build_prefix
-                        actions["PREFIX"] = prefix
-
-                        create_env(
-                            prefix,
-                            actions,
-                            config=config,
-                            subdir=subdir,
-                            env=env,
-                            clear_cache=clear_cache,
-                            is_cross=is_cross,
-                        )
-                    else:
+                    if not config.prefix_length_fallback:
                         raise
+                    log.warn(
+                        "Build prefix failed with prefix length %d",
+                        config.prefix_length,
+                    )
+                    log.warn("Error was: ")
+                    log.warn(str(exc))
+                    log.warn(
+                        "One or more of your package dependencies needs to be rebuilt "
+                        "with a longer prefix length."
+                    )
+                    log.warn(
+                        "Falling back to legacy prefix length of 80 characters."
+                    )
+                    log.warn(
+                        "Your package will not install into prefixes > 80 characters."
+                    )
+                    config.prefix_length = 80
+
+                    host = "_h_env" in prefix
+                    # Set this here and use to create environ
+                    #   Setting this here is important because we use it below (symlink)
+                    prefix = config.host_prefix if host else config.build_prefix
+                    actions["PREFIX"] = prefix
+
+                    create_env(
+                        prefix,
+                        actions,
+                        config=config,
+                        subdir=subdir,
+                        env=env,
+                        clear_cache=clear_cache,
+                        is_cross=is_cross,
+                    )
                 elif "lock" in str(exc):
                     if retry < config.max_env_retry:
                         log.warn(
@@ -1159,8 +1133,6 @@ def create_env(
                         raise
                 else:
                     raise
-            # HACK: some of the time, conda screws up somehow and incomplete packages result.
-            #    Just retry.
             except (
                 AssertionError,
                 OSError,
@@ -1209,7 +1181,7 @@ def remove_existing_packages(dirs, fns, config):
             for fn in fns:
                 all_files = [fn]
                 if not os.path.isabs(fn):
-                    all_files = glob(os.path.join(folder, fn + "*"))
+                    all_files = glob(os.path.join(folder, f"{fn}*"))
                 for entry in all_files:
                     utils.rm_rf(entry)
 
@@ -1217,10 +1189,7 @@ def remove_existing_packages(dirs, fns, config):
 def clean_pkg_cache(dist, config):
     locks = []
 
-    conda_log_level = logging.WARN
-    if config.debug:
-        conda_log_level = logging.DEBUG
-
+    conda_log_level = logging.DEBUG if config.debug else logging.WARN
     with utils.LoggingContext(conda_log_level):
         locks = get_pkg_dirs_locks([config.bldpkgs_dir] + pkgs_dirs, config)
         with utils.try_acquire_locks(locks, timeout=config.timeout):
@@ -1236,9 +1205,10 @@ def clean_pkg_cache(dist, config):
             for folder in pkgs_dirs:
                 if (
                     os.path.exists(os.path.join(folder, dist))
-                    or os.path.exists(os.path.join(folder, dist + ".tar.bz2"))
+                    or os.path.exists(os.path.join(folder, f"{dist}.tar.bz2"))
                     or any(
-                        pkg_id in package_cache() for pkg_id in [dist, "local::" + dist]
+                        pkg_id in package_cache()
+                        for pkg_id in [dist, f"local::{dist}"]
                     )
                 ):
                     log = utils.get_logger(__name__)
@@ -1275,7 +1245,7 @@ def get_pinned_deps(m, section):
             output_folder=m.config.output_folder,
             channel_urls=tuple(m.config.channel_urls),
         )
-    runtime_deps = [
-        " ".join(link.dist_name.rsplit("-", 2)) for link in actions.get("LINK", [])
+    return [
+        " ".join(link.dist_name.rsplit("-", 2))
+        for link in actions.get("LINK", [])
     ]
-    return runtime_deps

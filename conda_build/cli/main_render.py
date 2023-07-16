@@ -56,7 +56,7 @@ environment information to generate the rendered meta.yml files.""",
         "--version",
         action="version",
         help="Show the conda-build version number and exit.",
-        version="conda-build %s" % __version__,
+        version=f"conda-build {__version__}",
     )
     p.add_argument(
         "-n",
@@ -218,31 +218,29 @@ def execute(args, print_results=True):
 
     if args.file and len(metadata_tuples) > 1:
         log.warning(
-            "Multiple variants rendered. "
-            "Only one will be written to the file you specified ({}).".format(args.file)
+            f"Multiple variants rendered. Only one will be written to the file you specified ({args.file})."
         )
 
-    if print_results:
-        if args.output:
-            with LoggingContext(logging.CRITICAL + 1):
-                paths = api.get_output_file_paths(metadata_tuples, config=config)
-                print("\n".join(sorted(paths)))
-            if args.file:
-                m = metadata_tuples[-1][0]
-                api.output_yaml(m, args.file, suppress_outputs=True)
-        else:
-            logging.basicConfig(level=logging.INFO)
-            for m, _, _ in metadata_tuples:
-                print("--------------")
-                print("Hash contents:")
-                print("--------------")
-                pprint(m.get_hash_contents())
-                print("----------")
-                print("meta.yaml:")
-                print("----------")
-                print(api.output_yaml(m, args.file, suppress_outputs=True))
-    else:
+    if not print_results:
         return metadata_tuples
+    if args.output:
+        with LoggingContext(logging.CRITICAL + 1):
+            paths = api.get_output_file_paths(metadata_tuples, config=config)
+            print("\n".join(sorted(paths)))
+        if args.file:
+            m = metadata_tuples[-1][0]
+            api.output_yaml(m, args.file, suppress_outputs=True)
+    else:
+        logging.basicConfig(level=logging.INFO)
+        for m, _, _ in metadata_tuples:
+            print("--------------")
+            print("Hash contents:")
+            print("--------------")
+            pprint(m.get_hash_contents())
+            print("----------")
+            print("meta.yaml:")
+            print("----------")
+            print(api.output_yaml(m, args.file, suppress_outputs=True))
 
 
 def main():
