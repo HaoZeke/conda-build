@@ -198,17 +198,14 @@ def directory_size(path):
         if hasattr(out, "decode"):
             try:
                 out = out.decode(errors="ignore")
-            # This isn't important anyway so give up. Don't try search on bytes.
             except (UnicodeDecodeError, IndexError):
                 if on_win:
                     return 0
-                else:
-                    pass
         if on_win:
             # Windows can give long output, we need only 2nd to last line
             out = out.strip().rsplit("\r\n", 2)[-2]
             pattern = r"\s([\d\W]+).+"  # Language and punctuation neutral
-            out = re.search(pattern, out.strip()).group(1).strip()
+            out = re.search(pattern, out.strip())[1].strip()
             out = out.replace(",", "").replace(".", "").replace(" ", "")
         else:
             out = out.split()[0]
@@ -245,11 +242,7 @@ def _setup_rewrite_pipe(env):
 
     r_fd, w_fd = os.pipe()
     r = os.fdopen(r_fd, "rt")
-    if sys.platform == "win32":
-        replacement_t = "%{}%"
-    else:
-        replacement_t = "${}"
-
+    replacement_t = "%{}%" if sys.platform == "win32" else "${}"
     def rewriter():
         while True:
             try:
@@ -263,11 +256,9 @@ def _setup_rewrite_pipe(env):
                     line = line.replace(s, replacement_t.format(key))
                 sys.stdout.write(line)
             except UnicodeDecodeError:
-                try:
+                with contextlib.suppress(TypeError):
                     txt = os.read(r, 10000)
                     sys.stdout.write(txt or "")
-                except TypeError:
-                    pass
 
     t = Thread(target=rewriter)
     t.daemon = True
@@ -395,7 +386,7 @@ def _func_defaulting_env_to_os_environ(func, *popenargs, **kwargs):
     if "env" not in kwargs:
         kwargs = kwargs.copy()
         env_copy = os.environ.copy()
-        kwargs.update({"env": env_copy})
+        kwargs["env"] = env_copy
     kwargs["env"] = {str(key): str(value) for key, value in kwargs["env"].items()}
     _args = []
     if "stdin" not in kwargs:
@@ -412,8 +403,7 @@ def _func_defaulting_env_to_os_environ(func, *popenargs, **kwargs):
     if "stats" in kwargs:
         del kwargs["stats"]
 
-    rewrite_stdout_env = kwargs.pop("rewrite_stdout_env", None)
-    if rewrite_stdout_env:
+    if rewrite_stdout_env := kwargs.pop("rewrite_stdout_env", None):
         kwargs["stdout"] = _setup_rewrite_pipe(rewrite_stdout_env)
 
     out = None
@@ -422,27 +412,27 @@ def _func_defaulting_env_to_os_environ(func, *popenargs, **kwargs):
         if func == "output":
             out = proc.out.read()
 
-        if proc.returncode != 0:
+        if proc.returncode == 0:
+            stats.update(
+                {
+                    "elapsed": proc.elapsed,
+                    "disk": proc.disk,
+                    "processes": proc.processes,
+                    "cpu_user": proc.cpu_user,
+                    "cpu_sys": proc.cpu_sys,
+                    "rss": proc.rss,
+                    "vms": proc.vms,
+                }
+            )
+        else:
             raise subprocess.CalledProcessError(proc.returncode, _args)
 
-        stats.update(
-            {
-                "elapsed": proc.elapsed,
-                "disk": proc.disk,
-                "processes": proc.processes,
-                "cpu_user": proc.cpu_user,
-                "cpu_sys": proc.cpu_sys,
-                "rss": proc.rss,
-                "vms": proc.vms,
-            }
-        )
+    elif func == "call":
+        subprocess.check_call(_args, **kwargs)
     else:
-        if func == "call":
-            subprocess.check_call(_args, **kwargs)
-        else:
-            if "stdout" in kwargs:
-                del kwargs["stdout"]
-            out = subprocess.check_output(_args, **kwargs)
+        if "stdout" in kwargs:
+            del kwargs["stdout"]
+        out = subprocess.check_output(_args, **kwargs)
     return out
 
 
@@ -463,14 +453,12 @@ def bytes2human(n):
     # >>> bytes2human(100001221)
     # '95.4M'
     symbols = ("K", "M", "G", "T", "P", "E", "Z", "Y")
-    prefix = {}
-    for i, s in enumerate(symbols):
-        prefix[s] = 1 << (i + 1) * 10
+    prefix = {s: 1 << (i + 1) * 10 for i, s in enumerate(symbols)}
     for s in reversed(symbols):
         if n >= prefix[s]:
             value = float(n) / prefix[s]
             return f"{value:.1f}{s}"
-    return "%sB" % n
+    return f"{n}B"
 
 
 def seconds2human(s):
@@ -503,7 +491,7 @@ def get_recipe_abspath(recipe):
                 tar_xf(recipe_tarfile, os.path.join(recipe_dir, "info"))
             need_cleanup = True
         else:
-            print("Ignoring non-recipe: %s" % recipe)
+            print(f"Ignoring non-recipe: {recipe}")
             return (None, None)
     else:
         recipe_dir = abspath(os.path.join(os.getcwd(), recipe))
@@ -566,7 +554,7 @@ def _copy_with_shell_fallback(src, dst):
             func(src, dst)
             is_copied = True
             break
-        except (OSError, PermissionError):
+        except OSError:
             continue
     if not is_copied:
         try:
@@ -596,10 +584,8 @@ def copy_into(
     """Copy all the files and directories in src to the directory dst"""
     log = get_logger(__name__)
     if symlinks and islink(src):
-        try:
+        with contextlib.suppress(OSError):
             os.makedirs(os.path.dirname(dst))
-        except OSError:
-            pass
         if os.path.lexists(dst):
             os.remove(dst)
         src_base, dst_base = get_prefix_replacement_paths(src, dst)
@@ -624,20 +610,15 @@ def copy_into(
         )
 
     else:
-        if isdir(dst):
-            dst_fn = os.path.join(dst, os.path.basename(src))
-        else:
-            dst_fn = dst
-
+        dst_fn = os.path.join(dst, os.path.basename(src)) if isdir(dst) else dst
         if os.path.isabs(src):
             src_folder = os.path.dirname(src)
+        elif os.path.sep in dst_fn:
+            src_folder = os.path.dirname(dst_fn)
+            if not os.path.isdir(src_folder):
+                os.makedirs(src_folder)
         else:
-            if os.path.sep in dst_fn:
-                src_folder = os.path.dirname(dst_fn)
-                if not os.path.isdir(src_folder):
-                    os.makedirs(src_folder)
-            else:
-                src_folder = os.getcwd()
+            src_folder = os.getcwd()
 
         if os.path.islink(src) and not os.path.exists(os.path.realpath(src)):
             log.warn("path %s is a broken symlink - ignoring copy", src)
@@ -650,10 +631,8 @@ def copy_into(
             # if intermediate folders not not exist create them
             dst_folder = os.path.dirname(dst)
             if dst_folder and not os.path.exists(dst_folder):
-                try:
+                with contextlib.suppress(OSError):
                     os.makedirs(dst_folder)
-                except OSError:
-                    pass
             try:
                 _copy_with_shell_fallback(src, dst_fn)
             except shutil.Error:
@@ -726,20 +705,15 @@ def merge_tree(
     """
     dst = os.path.normpath(os.path.normcase(dst))
     src = os.path.normpath(os.path.normcase(src))
-    assert not dst.startswith(src), (
-        "Can't merge/copy source into subdirectory of itself.  "
-        "Please create separate spaces for these things.\n"
-        "  src: {}\n"
-        "  dst: {}".format(src, dst)
-    )
+    assert not dst.startswith(
+        src
+    ), f"Can't merge/copy source into subdirectory of itself.  Please create separate spaces for these things.\n  src: {src}\n  dst: {dst}"
 
     new_files = copytree(src, dst, symlinks=symlinks, dry_run=True)
     existing = [f for f in new_files if isfile(f)]
 
     if existing and not clobber:
-        raise OSError(
-            "Can't merge {} into {}: file exists: " "{}".format(src, dst, existing[0])
-        )
+        raise OSError(f"Can't merge {src} into {dst}: file exists: {existing[0]}")
 
     locks = []
     if locking:
@@ -867,7 +841,7 @@ uncompress (or gunzip) is required to unarchive .z source files.
         if not os.path.realpath(member.name).startswith(cwd):
             member.name = member.name.replace("../", "")
         if not os.path.realpath(member.name).startswith(cwd):
-            sys.exit("tarball contains unsafe path: " + member.name + " cwd is: " + cwd)
+            sys.exit(f"tarball contains unsafe path: {member.name} cwd is: {cwd}")
         members[i] = member
 
     t.extractall(path=dir_path)
@@ -902,8 +876,7 @@ def tar_xf_getnames(tarball):
         tarball = os.path.join(os.getcwd(), tarball)
     result = []
     with libarchive.file_reader(tarball) as archive:
-        for entry in archive:
-            result.append(entry.name)
+        result.extend(entry.name for entry in archive)
     return result
 
 
@@ -1036,8 +1009,7 @@ def get_stdlib_dir(prefix, py_ver):
     else:
         lib_dir = os.path.join(prefix, "lib")
         python_folder = glob(os.path.join(lib_dir, "python?.*"))
-        python_folder = sorted(filterfalse(islink, python_folder))
-        if python_folder:
+        if python_folder := sorted(filterfalse(islink, python_folder)):
             lib_dir = os.path.join(lib_dir, python_folder[0])
         else:
             lib_dir = os.path.join(lib_dir, f"python{py_ver}")
@@ -1083,8 +1055,7 @@ def sys_path_prepended(prefix):
         sys.path.insert(1, os.path.join(prefix, "lib", "site-packages"))
     else:
         lib_dir = os.path.join(prefix, "lib")
-        python_dir = glob(os.path.join(lib_dir, r"python[0-9\.]*"))
-        if python_dir:
+        if python_dir := glob(os.path.join(lib_dir, r"python[0-9\.]*")):
             python_dir = python_dir[0]
             sys.path.insert(1, os.path.join(python_dir, "site-packages"))
     try:
@@ -1123,13 +1094,13 @@ def create_entry_point(path, module, func, config):
     import_name = func.split(".")[0]
     pyscript = PY_TMPL % {"module": module, "func": func, "import_name": import_name}
     if on_win:
-        with open(path + "-script.py", "w") as fo:
+        with open(f"{path}-script.py", "w") as fo:
             if os.path.isfile(os.path.join(config.host_prefix, "python_d.exe")):
                 fo.write("#!python_d\n")
             fo.write(pyscript)
             copy_into(
                 join(dirname(__file__), f"cli-{str(config.host_arch)}.exe"),
-                path + ".exe",
+                f"{path}.exe",
                 config.timeout,
             )
     else:
@@ -1171,7 +1142,7 @@ def convert_path_for_cygwin_or_msys2(exe, path):
         with open(exe, "rb") as exe_file:
             exe_binary = exe_file.read()
             msys2_cygwin = re.findall(b"(cygwin1.dll|msys-2.0.dll)", exe_binary)
-            _posix_exes_cache[exe] = True if msys2_cygwin else False
+            _posix_exes_cache[exe] = bool(msys2_cygwin)
     if _posix_exes_cache[exe]:
         try:
             path = (
@@ -1188,9 +1159,7 @@ def convert_path_for_cygwin_or_msys2(exe, path):
 
 
 def get_skip_message(m):
-    return "Skipped: {} from {} defines build/skip for this configuration ({}).".format(
-        m.name(), m.path, {k: m.config.variant[k] for k in m.get_used_vars()}
-    )
+    return f"Skipped: {m.name()} from {m.path} defines build/skip for this configuration ({{k: m.config.variant[k] for k in m.get_used_vars()}})."
 
 
 def package_has_file(package_path, file_path, refresh_mode="modified"):
@@ -1208,8 +1177,7 @@ def package_has_file(package_path, file_path, refresh_mode="modified"):
         if os.path.exists(resolved_file_path):
             # TODO :: Remove this text-mode load. Files are binary.
             try:
-                with open(resolved_file_path) as f:
-                    content = f.read()
+                content = Path(resolved_file_path).read_text()
             except UnicodeDecodeError:
                 with open(resolved_file_path, "rb") as f:
                     content = f.read()
@@ -1319,9 +1287,11 @@ def expand_globs(path_list, root_dir):
         elif os.path.isdir(path):
             for root, dirnames, fs in walk(path):
                 files.extend(os.path.join(root, f) for f in fs)
-                for folder in dirnames:
-                    if os.path.islink(os.path.join(root, folder)):
-                        files.append(os.path.join(root, folder))
+                files.extend(
+                    os.path.join(root, folder)
+                    for folder in dirnames
+                    if os.path.islink(os.path.join(root, folder))
+                )
         else:
             # File compared to the globs use / as separator independently of the os
             glob_files = glob(path)
@@ -1332,9 +1302,8 @@ def expand_globs(path_list, root_dir):
             # "whether or not the results are sorted depends on the file system".
             # Avoid this potential ambiguity by sorting. (see #4185)
             files.extend(sorted(glob_files))
-    prefix_path_re = re.compile("^" + re.escape(f"{root_dir}{os.path.sep}"))
-    files = [prefix_path_re.sub("", f, 1) for f in files]
-    return files
+    prefix_path_re = re.compile(f'^{re.escape(f"{root_dir}{os.path.sep}")}')
+    return [prefix_path_re.sub("", f, 1) for f in files]
 
 
 def find_recipe(path):
@@ -1352,16 +1321,12 @@ def find_recipe(path):
     if os.path.isfile(path):
         if os.path.basename(path) in VALID_METAS:
             return path
-        raise OSError(
-            "{} is not a valid meta file ({})".format(path, ", ".join(VALID_METAS))
-        )
+        raise OSError(f'{path} is not a valid meta file ({", ".join(VALID_METAS)})')
 
     results = list(rec_glob(path, VALID_METAS, ignores=(".AppleDouble",)))
 
     if not results:
-        raise OSError(
-            "No meta files ({}) found in {}".format(", ".join(VALID_METAS), path)
-        )
+        raise OSError(f'No meta files ({", ".join(VALID_METAS)}) found in {path}')
 
     if len(results) == 1:
         return results[0]
@@ -1379,7 +1344,7 @@ def find_recipe(path):
         return os.path.join(path, metas[0])
 
     raise OSError(
-        "More than one meta files ({}) found in {}".format(", ".join(VALID_METAS), path)
+        f'More than one meta files ({", ".join(VALID_METAS)}) found in {path}'
     )
 
 
@@ -1415,10 +1380,7 @@ class LoggingContext:
         self.handler = handler
         self.close = close
         self.quiet = context.quiet
-        if not loggers:
-            self.loggers = LoggingContext.default_loggers
-        else:
-            self.loggers = loggers
+        self.loggers = LoggingContext.default_loggers if not loggers else loggers
 
     def __enter__(self):
         for logger in self.loggers:
@@ -1453,7 +1415,7 @@ def get_installed_packages(path):
     Scan all json files in 'path' and return a dictionary with their contents.
     Files are assumed to be in 'index.json' format.
     """
-    installed = dict()
+    installed = {}
     for filename in glob(os.path.join(path, "conda-meta", "*.json")):
         with open(filename) as file:
             data = json.load(file)
@@ -1543,13 +1505,13 @@ def trim_empty_keys(dict_):
         if hasattr(v, "keys"):
             trim_empty_keys(v)
         # empty lists and empty strings, and None are always empty.
-        if v == list() or v == "" or v is None or v == dict():
+        if v == [] or v == "" or v is None or v == {}:
             to_remove.add(k)
         # other things that evaluate as False may not be "empty" - things can be manually set to
         #     false, and we need to keep that setting.
         if not v and k in negative_means_empty:
             to_remove.add(k)
-    if "zip_keys" in dict_ and not any(v for v in dict_["zip_keys"]):
+    if "zip_keys" in dict_ and not any(dict_["zip_keys"]):
         to_remove.add("zip_keys")
     for k in to_remove:
         del dict_[k]
@@ -1557,10 +1519,7 @@ def trim_empty_keys(dict_):
 
 def _increment(version, alpha_ver):
     try:
-        if alpha_ver:
-            suffix = "a"
-        else:
-            suffix = ".0a0"
+        suffix = "a" if alpha_ver else ".0a0"
         last_version = str(int(version) + 1) + suffix
     except ValueError:
         last_version = chr(ord(version) + 1)
@@ -1607,11 +1566,11 @@ def apply_pin_expressions(version, min_pin="x.x.x.x.x.x.x", max_pin="x"):
         if version_order < VersionOrder(versions[0]):
             # If the minimum is greater than the version this is a pre-release build.
             # Use the version as the lower bound
-            versions[0] = ">=" + version
+            versions[0] = f">={version}"
         else:
-            versions[0] = ">=" + versions[0]
+            versions[0] = f">={versions[0]}"
     if versions[1]:
-        versions[1] = "<" + versions[1]
+        versions[1] = f"<{versions[1]}"
     return ",".join([v for v in versions if v])
 
 
@@ -1806,9 +1765,7 @@ def merge_or_update_dict(
                     and raise_on_clobber
                 ):
                     log.debug(
-                        "clobbering key {} (original value {}) with value {}".format(
-                            key, base_value, value
-                        )
+                        f"clobbering key {key} (original value {base_value}) with value {value}"
                     )
                 if value is None and key in base:
                     del base[key]
@@ -1861,19 +1818,19 @@ def mmap_mmap(
     was opened so must not be passed in at all to get this default behaviour.
     """
     if on_win:
-        if access:
-            return mmap.mmap(
+        return (
+            mmap.mmap(
                 fileno, length, tagname=tagname, access=access, offset=offset
             )
-        else:
-            return mmap.mmap(fileno, length, tagname=tagname)
+            if access
+            else mmap.mmap(fileno, length, tagname=tagname)
+        )
+    if access:
+        return mmap.mmap(
+            fileno, length, flags=flags, prot=prot, access=access, offset=offset
+        )
     else:
-        if access:
-            return mmap.mmap(
-                fileno, length, flags=flags, prot=prot, access=access, offset=offset
-            )
-        else:
-            return mmap.mmap(fileno, length, flags=flags, prot=prot)
+        return mmap.mmap(fileno, length, flags=flags, prot=prot)
 
 
 def remove_pycache_from_scripts(build_prefix):
@@ -1913,16 +1870,12 @@ def sort_list_in_nested_structure(dictionary, omissions=""):
                 ):
                     section.sort()
 
-        # there's a possibility for nested lists containing dictionaries
-        # in this case we recurse until we find a list to sort
         elif isinstance(value, list):
             for element in value:
                 if isinstance(element, dict):
                     sort_list_in_nested_structure(element)
-            try:
+            with contextlib.suppress(TypeError):
                 value.sort()
-            except TypeError:
-                pass
 
 
 # group one: package name
@@ -1948,30 +1901,27 @@ def ensure_valid_spec(spec, warn=False):
             and spec_ver_needing_star_re.match(str(spec.version))
         ):
             if str(spec.name) not in ("python", "numpy") or str(spec.version) != "x.x":
-                spec = MatchSpec(
-                    "{} {}".format(str(spec.name), str(spec.version) + ".*")
-                )
+                spec = MatchSpec(f"{str(spec.name)} {str(spec.version)}.*")
     else:
         match = spec_needing_star_re.match(spec)
         # ignore exact pins (would be a 3rd group)
         if match and not match.group(3):
             if match.group(1) in ("python", "numpy") and match.group(2) == "x.x":
                 spec = spec_needing_star_re.sub(r"\1 \2", spec)
-            else:
-                if "*" not in spec:
-                    if match.group(1) not in ("python", "vc") and warn:
-                        log = get_logger(__name__)
-                        log.warn(
-                            "Adding .* to spec '{}' to ensure satisfiability.  Please "
-                            "consider putting {{{{ var_name }}}}.* or some relational "
-                            "operator (>/</>=/<=) on this spec in meta.yaml, or if req is "
-                            "also a build req, using {{{{ pin_compatible() }}}} jinja2 "
-                            "function instead.  See "
-                            "https://conda.io/docs/user-guide/tasks/build-packages/variants.html#pinning-at-the-variant-level".format(  # NOQA
-                                spec
-                            )
+            elif "*" not in spec:
+                if match.group(1) not in ("python", "vc") and warn:
+                    log = get_logger(__name__)
+                    log.warn(
+                        "Adding .* to spec '{}' to ensure satisfiability.  Please "
+                        "consider putting {{{{ var_name }}}}.* or some relational "
+                        "operator (>/</>=/<=) on this spec in meta.yaml, or if req is "
+                        "also a build req, using {{{{ pin_compatible() }}}} jinja2 "
+                        "function instead.  See "
+                        "https://conda.io/docs/user-guide/tasks/build-packages/variants.html#pinning-at-the-variant-level".format(  # NOQA
+                            spec
                         )
-                    spec = spec_needing_star_re.sub(r"\1 \2.*", spec)
+                    )
+                spec = spec_needing_star_re.sub(r"\1 \2.*", spec)
     return spec
 
 
@@ -2094,14 +2044,10 @@ def write_bat_activation_text(file_handle, m):
     )
     from conda_build.os_utils.external import find_executable
 
-    ccache = find_executable("ccache", m.config.build_prefix, False)
-    if ccache:
+    if ccache := find_executable("ccache", m.config.build_prefix, False):
         if isinstance(ccache, list):
             ccache = ccache[0]
-        ccache_methods = {}
-        ccache_methods["env_vars"] = False
-        ccache_methods["symlinks"] = False
-        ccache_methods["native"] = False
+        ccache_methods = {"env_vars": False, "symlinks": False, "native": False}
         if hasattr(m.config, "ccache_method"):
             ccache_methods[m.config.ccache_method] = True
         for method, value in ccache_methods.items():
@@ -2109,6 +2055,8 @@ def write_bat_activation_text(file_handle, m):
                 if method == "env_vars":
                     file_handle.write(f'set "CC={ccache} %CC%"\n')
                     file_handle.write(f'set "CXX={ccache} %CXX%"\n')
+                elif method == "native":
+                    pass
                 elif method == "symlinks":
                     dirname_ccache_ln_bin = join(m.config.build_prefix, "ccache-ln-bin")
                     file_handle.write(f"mkdir {dirname_ccache_ln_bin}\n")
@@ -2137,8 +2085,6 @@ def write_bat_activation_text(file_handle, m):
                             dirname_ccache=os.path.dirname(ccache),
                         )
                     )
-                elif method == "native":
-                    pass
                 else:
                     print("ccache method {} not implemented")
 
@@ -2156,7 +2102,7 @@ def download_channeldata(channel_url):
             with TemporaryDirectory() as td:
                 tf = os.path.join(td, "channeldata.json")
                 try:
-                    download(url + "/channeldata.json", tf)
+                    download(f"{url}/channeldata.json", tf)
                     with open(tf) as f:
                         new_channeldata = json.load(f)
                 except (JSONDecodeError, CondaHTTPError):
@@ -2195,17 +2141,14 @@ def shutil_move_more_retrying(src, dest, debug_name):
             shutil.move(src, dest)
             if attempts_left != 5:
                 log.warning(
-                    "shutil.move({}={}, dest={}) succeeded on attempt number {}".format(
-                        debug_name, src, dest, 6 - attempts_left
-                    )
+                    f"shutil.move({debug_name}={src}, dest={dest}) succeeded on attempt number {6 - attempts_left}"
                 )
             attempts_left = -1
         except:
-            attempts_left = attempts_left - 1
+            attempts_left -= 1
         if attempts_left > 0:
             log.warning(
-                "Failed to rename {} directory, check with strace, struss or procmon. "
-                "Will sleep for 3 seconds and try again!".format(debug_name)
+                f"Failed to rename {debug_name} directory, check with strace, struss or procmon. Will sleep for 3 seconds and try again!"
             )
             import time
 

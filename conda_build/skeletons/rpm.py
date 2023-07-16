@@ -189,10 +189,7 @@ def package_exists(package_name):
 
 
 def cache_file(src_cache, url, fn=None, checksummer=hashlib.sha256):
-    if fn:
-        source = dict({"url": url, "fn": fn})
-    else:
-        source = dict({"url": url})
+    source = dict({"url": url, "fn": fn}) if fn else dict({"url": url})
     cached_path, _ = download_to_cache(src_cache, "", source)
     csum = checksummer()
     csum.update(open(cached_path, "rb").read())
@@ -207,12 +204,12 @@ def rpm_filename_split(rpmfilename):
     if len(parts) == 2:
         release, platform = parts[0], parts[1]
     elif len(parts) > 2:
-        release, platform = ".".join(parts[0 : len(parts) - 1]), ".".join(parts[-1:])
+        release, platform = ".".join(parts[:-1]), ".".join(parts[-1:])
     else:
         print(f"ERROR: Cannot figure out the release and platform for {base}")
-    name_version = base.split("-")[0:-1]
+    name_version = base.split("-")[:-1]
     version = name_version[-1]
-    rpm_name = "-".join(name_version[0 : len(name_version) - 1])
+    rpm_name = "-".join(name_version[:-1])
     return rpm_name, version, release, platform
 
 
@@ -263,15 +260,12 @@ def find_repo_entry_and_arch(repo_primary, architectures, depend):
         )  # noqa
         return None, None, None
 
-    chosen_arch = None
-    for arch in architectures:
-        if arch in found_package:
-            chosen_arch = arch
-            break
-    if not chosen_arch:
+    if chosen_arch := next(
+        (arch for arch in architectures if arch in found_package), None
+    ):
+        return found_package[chosen_arch], found_package_name, chosen_arch
+    else:
         return None, None, None
-    entry = found_package[chosen_arch]
-    return entry, found_package_name, chosen_arch
 
 
 str_flags_to_conda_version_spec = dict(
@@ -299,7 +293,7 @@ def dictify(r, root=True):
 
 
 def dictify_pickled(xml_file, src_cache, dict_massager=None, cdt=None):
-    pickled = xml_file + ".p"
+    pickled = f"{xml_file}.p"
     if exists(pickled):
         return pickle.load(open(pickled, "rb"))
     with open(xml_file, encoding="utf-8") as xf:
@@ -331,15 +325,13 @@ def get_repo_dict(repomd_url, data_type, dict_massager, cdt, src_cache):
         except:
             csum = child.findall("checksum")[0].text
             location = child.findall("location")[0].attrib["href"]
-            xmlgz_file = dirname(dirname(repomd_url)) + "/" + location
+            xmlgz_file = f"{dirname(dirname(repomd_url))}/{location}"
             cached_path, cached_csum = cache_file(
                 src_cache, xmlgz_file, None, cdt["checksummer"]
             )
             assert (
                 csum == cached_csum
-            ), "Checksum for {} does not match value in {}".format(
-                xmlgz_file, repomd_url
-            )
+            ), f"Checksum for {xmlgz_file} does not match value in {repomd_url}"
             with gzip.open(cached_path, "rb") as gz:
                 xml_content = gz.read()
                 xml_csum = cdt["checksummer"]()
@@ -407,10 +399,7 @@ def massage_primary(repo_primary, src_cache, cdt):
             description = package["description"][0]["_text"]
         except:
             description = "NA"
-        if "_text" in package["url"][0]:
-            url = package["url"][0]["_text"]
-        else:
-            url = ""
+        url = package["url"][0]["_text"] if "_text" in package["url"][0] else ""
         license = package["format"][0]["{rpm}license"][0]["_text"]
         try:
             provides = package["format"][0]["{rpm}provides"][0]["{rpm}entry"]
@@ -448,18 +437,18 @@ def massage_primary(repo_primary, src_cache, cdt):
 def valid_depends(depends):
     name = depends["name"]
     str_flags = depends["flags"]
-    if (
-        not name.startswith("rpmlib(")
-        and not name.startswith("config(")
-        and not name.startswith("pkgconfig(")
-        and not name.startswith("/")
-        and name != "rtld(GNU_HASH)"
-        and ".so" not in name
-        and "(" not in name
-        and str_flags
-    ):
-        return True
-    return False
+    return bool(
+        (
+            not name.startswith("rpmlib(")
+            and not name.startswith("config(")
+            and not name.startswith("pkgconfig(")
+            and not name.startswith("/")
+            and name != "rtld(GNU_HASH)"
+            and ".so" not in name
+            and "(" not in name
+            and str_flags
+        )
+    )
 
 
 def remap_license(rpm_license):
@@ -512,10 +501,7 @@ def write_conda_recipes(
     )
     if not entry:
         return
-    if override_arch:
-        arch = architectures[0]
-    else:
-        arch = cdt["fname_architecture"]
+    arch = architectures[0] if override_arch else cdt["fname_architecture"]
     package = entry_name
     rpm_url = dirname(dirname(cdt["base_url"])) + "/" + entry["location"]
     srpm_url = cdt["sbase_url"] + entry["source"]
@@ -545,11 +531,7 @@ def write_conda_recipes(
                             del copy_provides["rel"]
                         depends.append(copy_provides)
             else:
-                print(
-                    "WARNING: Additional dependency of {}, {} not found".format(
-                        package, missing_dep
-                    )
-                )
+                print(f"WARNING: Additional dependency of {package}, {missing_dep} not found")
     for depend in depends:
         dep_entry, dep_name, dep_arch = find_repo_entry_and_arch(
             repo_primary, architectures, depend
@@ -581,13 +563,7 @@ def write_conda_recipes(
     dependsstr = ""
     if len(depends):
         depends_specs = [
-            "{}-{}-{} {}{}".format(
-                depend["name"].lower().replace("+", "x"),
-                cdt["short_name"],
-                depend["arch"],
-                depend["flags"],
-                depend["ver"],
-            )
+            f'{depend["name"].lower().replace("+", "x")}-{cdt["short_name"]}-{depend["arch"]} {depend["flags"]}{depend["ver"]}'
             for depend in depends
         ]
         dependsstr_part = "\n".join(
@@ -601,7 +577,7 @@ def write_conda_recipes(
         )
 
     package_l = package.lower().replace("+", "x")
-    package_cdt_name = package_l + "-" + sn
+    package_cdt_name = f"{package_l}-{sn}"
     license, license_family = remap_license(entry["license"])
     d = dict(
         {
@@ -683,17 +659,14 @@ def write_conda_recipe(
             "bits": bits,
         }
     )
-    cdt = dict()
-    for k, v in CDTs[cdt_name].items():
-        if isinstance(v, str):
-            cdt[k] = v.format(**architecture_bits)
-        else:
-            cdt[k] = v
-
+    cdt = {
+        k: v.format(**architecture_bits) if isinstance(v, str) else v
+        for k, v in CDTs[cdt_name].items()
+    }
     # Add undeclared dependencies. These can be baked into the global
     # CDTs dict, passed in on the commandline or a mixture of both.
     if "dependency_add" not in cdt:
-        cdt["dependency_add"] = dict()
+        cdt["dependency_add"] = {}
     if dependency_add:
         for package_and_missed_deps in dependency_add:
             as_list = package_and_missed_deps[0].split(",")

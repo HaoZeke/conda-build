@@ -23,7 +23,7 @@ def find_executable(executable, prefix=None, all_matches=False):
             join(root_dir, "Library\\bin"),
         ]
         if prefix:
-            dir_paths[0:0] = [
+            dir_paths[:0] = [
                 join(prefix, "Scripts"),
                 join(prefix, "Library\\mingw-w64\\bin"),
                 join(prefix, "Library\\usr\\bin"),
@@ -37,11 +37,7 @@ def find_executable(executable, prefix=None, all_matches=False):
             dir_paths.insert(0, join(prefix, "bin"))
 
     dir_paths.extend(os.environ["PATH"].split(os.pathsep))
-    if sys.platform == "win32":
-        exts = (".exe", ".bat", "")
-    else:
-        exts = ("",)
-
+    exts = (".exe", ".bat", "") if sys.platform == "win32" else ("", )
     all_matches_found = []
     for dir_path in dir_paths:
         for ext in exts:
@@ -54,9 +50,8 @@ def find_executable(executable, prefix=None, all_matches=False):
                     else:
                         result = path
                         break
-        if not result and any([f in executable for f in ("*", "?", ".")]):
-            matches = glob(os.path.join(dir_path, executable))
-            if matches:
+        if not result and any(f in executable for f in ("*", "?", ".")):
+            if matches := glob(os.path.join(dir_path, executable)):
                 if all_matches:
                     all_matches_found.extend(matches)
                 else:
@@ -70,7 +65,7 @@ def find_executable(executable, prefix=None, all_matches=False):
 def find_preferably_prefixed_executable(
     executable, build_prefix=None, all_matches=False
 ):
-    found = find_executable("*" + executable, build_prefix, all_matches)
+    found = find_executable(f"*{executable}", build_prefix, all_matches)
     if not found:
         # It is possible to force non-prefixed exes by passing os.sep as the
         # first character in executable. basename makes this work.

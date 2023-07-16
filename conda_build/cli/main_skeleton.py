@@ -35,7 +35,7 @@ options available.
     for skeleton in skeletons:
         if skeleton.startswith("_"):
             continue
-        module = importlib.import_module("conda_build.skeletons." + skeleton)
+        module = importlib.import_module(f"conda_build.skeletons.{skeleton}")
         module.add_parser(repos)
 
     args = p.parse_args(args)

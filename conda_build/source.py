@@ -54,7 +54,7 @@ def append_hash_to_fn(fn, hash_value):
 def download_to_cache(cache_folder, recipe_path, source_dict, verbose=False):
     """Download a source to the local cache."""
     if verbose:
-        log.info("Source cache directory is: %s" % cache_folder)
+        log.info(f"Source cache directory is: {cache_folder}")
     if not isdir(cache_folder) and not os.path.islink(cache_folder):
         os.makedirs(cache_folder)
 
@@ -74,16 +74,15 @@ def download_to_cache(cache_folder, recipe_path, source_dict, verbose=False):
             break
     else:
         log.warn(
-            "No hash (md5, sha1, sha256) provided for {}.  Source download forced.  "
-            "Add hash to recipe to use source cache.".format(unhashed_fn)
+            f"No hash (md5, sha1, sha256) provided for {unhashed_fn}.  Source download forced.  Add hash to recipe to use source cache."
         )
     path = join(cache_folder, fn)
     if isfile(path):
         if verbose:
-            log.info("Found source in cache: %s" % fn)
+            log.info(f"Found source in cache: {fn}")
     else:
         if verbose:
-            log.info("Downloading source to cache: %s" % fn)
+            log.info(f"Downloading source to cache: {fn}")
 
         for url in source_urls:
             if "://" not in url:
@@ -92,19 +91,18 @@ def download_to_cache(cache_folder, recipe_path, source_dict, verbose=False):
                 if not os.path.isabs(url):
                     url = os.path.normpath(os.path.join(recipe_path, url))
                 url = url_path(url)
-            else:
-                if url.startswith("file:///~"):
-                    url = "file:///" + expanduser(url[8:]).replace("\\", "/")
+            elif url.startswith("file:///~"):
+                url = "file:///" + expanduser(url[8:]).replace("\\", "/")
             try:
                 if verbose:
-                    log.info("Downloading %s" % url)
+                    log.info(f"Downloading {url}")
                 with LoggingContext():
                     download(url, path)
             except CondaHTTPError as e:
-                log.warn("Error: %s" % str(e).strip())
+                log.warn(f"Error: {str(e).strip()}")
                 rm_rf(path)
             except RuntimeError as e:
-                log.warn("Error: %s" % str(e).strip())
+                log.warn(f"Error: {str(e).strip()}")
                 rm_rf(path)
             else:
                 if verbose:
@@ -112,7 +110,7 @@ def download_to_cache(cache_folder, recipe_path, source_dict, verbose=False):
                 break
         else:  # no break
             rm_rf(path)
-            raise RuntimeError("Could not download %s" % url)
+            raise RuntimeError(f"Could not download {url}")
 
     hashed = None
     for tp in ("md5", "sha1", "sha256"):
@@ -121,11 +119,7 @@ def download_to_cache(cache_folder, recipe_path, source_dict, verbose=False):
             hashed = hashsum_file(path, tp)
             if expected_hash != hashed:
                 rm_rf(path)
-                raise RuntimeError(
-                    "{} mismatch: '{}' != '{}'".format(
-                        tp.upper(), hashed, expected_hash
-                    )
-                )
+                raise RuntimeError(f"{tp.upper()} mismatch: '{hashed}' != '{expected_hash}'")
             break
 
     # this is really a fallback.  If people don't provide the hash, we still need to prevent
@@ -253,8 +247,7 @@ def git_mirror_checkout_recursive(
 
     if not mirror_dir.startswith(git_cache + os.sep):
         sys.exit(
-            "Error: Attempting to mirror to %s which is outside of GIT_CACHE %s"
-            % (mirror_dir, git_cache)
+            f"Error: Attempting to mirror to {mirror_dir} which is outside of GIT_CACHE {git_cache}"
         )
 
     # This is necessary for Cygwin git and m2-git, although it is fixed in newer MSYS2.
@@ -300,10 +293,7 @@ def git_mirror_checkout_recursive(
                     stderr=stderr,
                 )
         except CalledProcessError:
-            msg = (
-                "Failed to update local git cache. "
-                "Deleting local cached repo: {} ".format(mirror_dir)
-            )
+            msg = f"Failed to update local git cache. Deleting local cached repo: {mirror_dir} "
             print(msg)
 
             # Maybe the failure was caused by a corrupt mirror directory.
@@ -373,15 +363,13 @@ def git_mirror_checkout_recursive(
         if matches and matches.group(2)[0] == ".":
             submod_name = matches.group(1)
             submod_rel_path = matches.group(2)
-            submod_url = urljoin(git_url + "/", submod_rel_path)
+            submod_url = urljoin(f"{git_url}/", submod_rel_path)
             submod_mirror_dir = os.path.normpath(
                 os.path.join(mirror_dir, submod_rel_path)
             )
             if verbose:
                 print(
-                    "Relative submodule {} found: url is {}, submod_mirror_dir is {}".format(
-                        submod_name, submod_url, submod_mirror_dir
-                    )
+                    f"Relative submodule {submod_name} found: url is {submod_url}, submod_mirror_dir is {submod_mirror_dir}"
                 )
             with TemporaryDirectory() as temp_checkout_dir:
                 git_mirror_checkout_recursive(
@@ -438,10 +426,7 @@ def git_source(source_dict, git_cache, src_dir, recipe_path=None, verbose=True):
     if git_url.startswith("."):
         # It's a relative path from the conda recipe
         git_url = abspath(normpath(os.path.join(recipe_path, git_url)))
-        if sys.platform == "win32":
-            git_dn = git_url.replace(":", "_")
-        else:
-            git_dn = git_url[1:]
+        git_dn = git_url.replace(":", "_") if sys.platform == "win32" else git_url[1:]
     else:
         git_dn = git_url.split("://")[-1].replace("/", os.sep)
         if git_dn.startswith(os.sep):
@@ -495,7 +480,7 @@ def git_info(src_dir, build_prefix, git=None, verbose=True, fo=None):
             stdout = check_output_env(cmd, stderr=stderr, cwd=src_dir, env=env)
         except CalledProcessError as e:
             if check_error:
-                raise Exception("git error: %s" % str(e))
+                raise Exception(f"git error: {str(e)}")
         encoding = locale.getpreferredencoding()
         if not fo:
             encoding = sys.stdout.encoding
@@ -503,13 +488,12 @@ def git_info(src_dir, build_prefix, git=None, verbose=True, fo=None):
         if hasattr(stdout, "decode"):
             stdout = stdout.decode(encoding, "ignore")
         if fo:
-            fo.write("==> {} <==\n".format(" ".join(cmd)))
+            fo.write(f'==> {" ".join(cmd)} <==\n')
             if verbose:
                 fo.write(stdout + "\n")
-        else:
-            if verbose:
-                print("==> {} <==\n".format(" ".join(cmd)))
-                safe_print_unicode(stdout + "\n")
+        elif verbose:
+            print(f'==> {" ".join(cmd)} <==\n')
+            safe_print_unicode(stdout + "\n")
 
 
 def hg_source(source_dict, src_dir, hg_cache, verbose):
@@ -564,7 +548,7 @@ def svn_source(
         stderr = FNULL
 
     def parse_bool(s):
-        return str(s).lower().strip() in ("yes", "true", "1", "on")
+        return str(s).lower().strip() in {"yes", "true", "1", "on"}
 
     svn_url = source_dict["svn_url"]
     svn_revision = source_dict.get("svn_rev") or "head"
@@ -630,19 +614,14 @@ def get_repository_info(recipe_path):
             info = info.decode(
                 "utf-8"
             )  # Py3 returns a byte string, but re needs unicode or str.
-            server = re.search("Repository Root: (.*)$", info, flags=re.M).group(1)
-            revision = re.search("Revision: (.*)$", info, flags=re.M).group(1)
+            server = re.search("Repository Root: (.*)$", info, flags=re.M)[1]
+            revision = re.search("Revision: (.*)$", info, flags=re.M)[1]
             return f"{server}, Revision {revision}"
         else:
-            return "{}, last modified {}".format(
-                recipe_path,
-                time.ctime(os.path.getmtime(join(recipe_path, "meta.yaml"))),
-            )
+            return f'{recipe_path}, last modified {time.ctime(os.path.getmtime(join(recipe_path, "meta.yaml")))}'
     except CalledProcessError:
-        get_logger(__name__).debug("Failed to checkout source in " + recipe_path)
-        return "{}, last modified {}".format(
-            recipe_path, time.ctime(os.path.getmtime(join(recipe_path, "meta.yaml")))
-        )
+        get_logger(__name__).debug(f"Failed to checkout source in {recipe_path}")
+        return f'{recipe_path}, last modified {time.ctime(os.path.getmtime(join(recipe_path, "meta.yaml")))}'
 
 
 _RE_LF = re.compile(rb"(?<!\r)\n")
@@ -698,13 +677,13 @@ def _get_patch_file_details(path):
         files = []
         first_line = True
         is_git_format = True
-        for line in f.readlines():
+        for line in f:
             if first_line and not re.match(r"From [0-9a-f]{40}", line):
                 is_git_format = False
             first_line = False
             m = re_files.search(line)
-            if m and m.group(1) != "/dev/null":
-                files.append(m.group(1))
+            if m and m[1] != "/dev/null":
+                files.append(m[1])
             elif (
                 is_git_format
                 and line.startswith("git")
@@ -815,12 +794,12 @@ def _get_patch_attributes(
     if patch_exe:
         # Good, we have a patch executable so we can perform some checks:
         with noop_context(
-            retained_tmpdir
-        ) if retained_tmpdir else TemporaryDirectory() as tmpdir:
+                    retained_tmpdir
+                ) if retained_tmpdir else TemporaryDirectory() as tmpdir:
             # Make all the fmts.
             result["patches"] = {}
             for fmt, _ in fmts.items():
-                new_patch = os.path.join(tmpdir, os.path.basename(path) + f".{fmt}")
+                new_patch = os.path.join(tmpdir, f"{os.path.basename(path)}.{fmt}")
                 if fmt == "native":
                     try:
                         shutil.copy2(path, new_patch)
@@ -885,7 +864,6 @@ def _get_patch_attributes(
                     except Exception as e:
                         print(e)
                         result[check_name] = False
-                        pass
                     else:
                         result[check_name] = fmt
                         # Save the first one found.
@@ -956,7 +934,7 @@ def apply_one_patch(src_dir, recipe_dir, rel_path, config, git=None):
 
     exception = None
     if not isfile(path):
-        raise RuntimeError("Error: no such patch: %s" % path)
+        raise RuntimeError(f"Error: no such patch: {path}")
 
     if config.verbose:
         stdout = None
@@ -1032,11 +1010,7 @@ def provide(metadata):
         os.makedirs(metadata.config.build_folder)
     git = None
 
-    if hasattr(meta, "keys"):
-        dicts = [meta]
-    else:
-        dicts = meta
-
+    dicts = [meta] if hasattr(meta, "keys") else meta
     try:
         for source_dict in dicts:
             folder = source_dict.get("folder")
@@ -1060,9 +1034,6 @@ def provide(metadata):
                     metadata.path,
                     verbose=metadata.config.verbose,
                 )
-            # build to make sure we have a work directory with source in it. We
-            #    want to make sure that whatever version that is does not
-            #    interfere with the test we run next.
             elif "hg_url" in source_dict:
                 hg_source(
                     source_dict,
@@ -1113,21 +1084,22 @@ def provide(metadata):
                         locking=metadata.config.locking,
                         clobber=True,
                     )
-            else:  # no source
-                if not isdir(src_dir):
-                    os.makedirs(src_dir)
+            elif not isdir(src_dir):
+                os.makedirs(src_dir)
 
             patches = ensure_list(source_dict.get("patches", []))
-            patch_attributes_output = []
-            for patch in patches:
-                patch_attributes_output += [
-                    apply_one_patch(src_dir, metadata.path, patch, metadata.config, git)
-                ]
+            patch_attributes_output = [
+                apply_one_patch(
+                    src_dir, metadata.path, patch, metadata.config, git
+                )
+                for patch in patches
+            ]
             _patch_attributes_debug_print(patch_attributes_output)
 
     except CalledProcessError:
         shutil.move(
-            metadata.config.work_dir, metadata.config.work_dir + "_failed_provide"
+            metadata.config.work_dir,
+            f"{metadata.config.work_dir}_failed_provide",
         )
         raise
 

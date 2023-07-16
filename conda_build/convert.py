@@ -39,9 +39,7 @@ def retrieve_c_extensions(file_path, show_imports=False):
         for filename in tar.getnames():
             if filename.endswith((".pyd", ".so")):
                 filename_match = c_extension_pattern.match(filename)
-                import_name = "import {}".format(
-                    filename_match.group(3).replace("/", ".")
-                )
+                import_name = f'import {filename_match[3].replace("/", ".")}'
                 imports.append(import_name)
 
     return imports
@@ -90,10 +88,8 @@ def retrieve_python_version(file_path):
     """
     if "python" in file_path:
         pattern = re.compile(r"python\d\.\d+")
-        matched = pattern.search(file_path)
-
-        if matched:
-            return matched.group(0)
+        if matched := pattern.search(file_path):
+            return matched[0]
 
     else:
         if file_path.endswith((".tar.bz2", ".tar")):
@@ -108,14 +104,10 @@ def retrieve_python_version(file_path):
             with open(path_file) as index_file:
                 index = json.load(index_file)
 
-        build_version_number = re.search(r"(.*)?(py)(\d\d)(.*)?", index["build"]).group(
-            3
-        )
+        build_version_number = re.search(r"(.*)?(py)(\d\d)(.*)?", index["build"])[3]
         build_version = re.sub(r"\A.*py\d\d.*\Z", "python", index["build"])
 
-        return "{}{}.{}".format(
-            build_version, build_version_number[0], build_version_number[1]
-        )
+        return f"{build_version}{build_version_number[0]}.{build_version_number[1]}"
 
 
 def extract_temporary_directory(file_path):
@@ -151,9 +143,9 @@ def update_dependencies(new_dependencies, existing_dependencies):
     dependency_names = {dependency.split()[0] for dependency in new_dependencies}
     index_dependency_names = {index.split()[0] for index in existing_dependencies}
 
-    repeated_packages = index_dependency_names.intersection(dependency_names)
-
-    if len(repeated_packages) > 0:
+    if repeated_packages := index_dependency_names.intersection(
+        dependency_names
+    ):
         for index_dependency in existing_dependencies:
             for dependency in repeated_packages:
                 if index_dependency.startswith(dependency):
@@ -198,13 +190,9 @@ def update_index_file(temp_dir, target_platform, dependencies, verbose):
         source_architecture = "32"
 
     if verbose:
-        print("Updating platform from {} to {}".format(index["platform"], platform))
-        print("Updating subdir from {} to {}".format(index["subdir"], target_platform))
-        print(
-            "Updating architecture from {} to {}".format(
-                source_architecture, architecture
-            )
-        )
+        print(f'Updating platform from {index["platform"]} to {platform}')
+        print(f'Updating subdir from {index["subdir"]} to {target_platform}')
+        print(f"Updating architecture from {source_architecture} to {architecture}")
 
     index["platform"] = platform
     index["subdir"] = target_platform
@@ -277,10 +265,9 @@ def update_lib_contents(lib_directory, temp_dir, target_platform, file_path):
                         temp_dir, os.path.join("lib", "site-packages")
                     )
                     os.renames(lib_file, new_site_packages_path)
-                else:
-                    if retrieve_python_version(lib_file) is not None:
-                        python_version = retrieve_python_version(lib_file)
-                        os.renames(lib_file, lib_file.replace(python_version, ""))
+                elif retrieve_python_version(lib_file) is not None:
+                    python_version = retrieve_python_version(lib_file)
+                    os.renames(lib_file, lib_file.replace(python_version, ""))
         except OSError:
             pass
 
@@ -518,21 +505,20 @@ def rename_executable(directory, executable, target_platform):
 
         os.renames(old_executable_path, new_executable_path)
 
-    else:
-        if old_executable_path.endswith(".py"):
-            new_executable_path = old_executable_path.replace("-script.py", "")
+    elif old_executable_path.endswith(".py"):
+        new_executable_path = old_executable_path.replace("-script.py", "")
 
-            with open(old_executable_path) as script_file_in:
-                lines = script_file_in.read().splitlines()
+        with open(old_executable_path) as script_file_in:
+            lines = script_file_in.read().splitlines()
 
-            with open(old_executable_path, "w") as script_file_out:
-                script_file_out.write(
-                    "#!/opt/anaconda1anaconda2anaconda3/bin/python" + "\n"
-                )
-                for line in lines:
-                    script_file_out.write(line + "\n")
+        with open(old_executable_path, "w") as script_file_out:
+            script_file_out.write(
+                "#!/opt/anaconda1anaconda2anaconda3/bin/python" + "\n"
+            )
+            for line in lines:
+                script_file_out.write(line + "\n")
 
-            os.renames(old_executable_path, new_executable_path)
+        os.renames(old_executable_path, new_executable_path)
 
 
 def remove_executable(directory, executable):
@@ -719,9 +705,7 @@ def convert_from_unix_to_windows(
                     )
 
                     prefixes.add(
-                        "/opt/anaconda1anaconda2anaconda3 text Scripts/{}-script.py\n".format(
-                            retrieve_executable_name(script)
-                        )
+                        f"/opt/anaconda1anaconda2anaconda3 text Scripts/{retrieve_executable_name(script)}-script.py\n"
                     )
 
             new_bin_path = os.path.join(temp_dir, "Scripts")
@@ -766,9 +750,7 @@ def convert_from_windows_to_unix(
                     remove_executable(directory, script)
 
                     prefixes.add(
-                        "/opt/anaconda1anaconda2anaconda3 text bin/{}\n".format(
-                            retrieve_executable_name(script)
-                        )
+                        f"/opt/anaconda1anaconda2anaconda3 text bin/{retrieve_executable_name(script)}\n"
                     )
 
             new_bin_path = os.path.join(temp_dir, "bin")
@@ -824,8 +806,7 @@ def conda_convert(
 
     if len(retrieve_c_extensions(file_path)) > 0 and not force:
         sys.exit(
-            "WARNING: Package {} contains C extensions; skipping conversion. "
-            "Use -f to force conversion.".format(os.path.basename(file_path))
+            f"WARNING: Package {os.path.basename(file_path)} contains C extensions; skipping conversion. Use -f to force conversion."
         )
 
     conversion_platform, source_platform, architecture = retrieve_package_platform(
@@ -853,16 +834,13 @@ def conda_convert(
     for platform in platforms:
         if platform == source_platform_architecture:
             print(
-                "Source platform '{}' and target platform '{}' are identical. "
-                "Skipping conversion.".format(source_platform_architecture, platform)
+                f"Source platform '{source_platform_architecture}' and target platform '{platform}' are identical. Skipping conversion."
             )
             continue
 
         if not quiet:
             print(
-                "Converting {} from {} to {}".format(
-                    os.path.basename(file_path), source_platform_architecture, platform
-                )
+                f"Converting {os.path.basename(file_path)} from {source_platform_architecture} to {platform}"
             )
 
         if platform.startswith(("osx", "linux")) and conversion_platform == "unix":

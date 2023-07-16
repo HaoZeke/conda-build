@@ -28,17 +28,15 @@ def ldd(path):
             continue
 
         assert line[0] == "\t", (path, line)
-        m = LDD_RE.match(line)
-        if m:
+        if m := LDD_RE.match(line):
             res.append(m.groups())
             continue
-        m = LDD_NOT_FOUND_RE.match(line)
-        if m:
+        if m := LDD_NOT_FOUND_RE.match(line):
             res.append((m.group(1), "not found"))
             continue
         if "ld-linux" in line:
             continue
-        raise RuntimeError("Unexpected output from ldd: %s" % line)
+        raise RuntimeError(f"Unexpected output from ldd: {line}")
 
     return res
 
@@ -81,22 +79,21 @@ def _get_linkages(obj_files, prefix, sysroot):
             res_py = [(basename(lp), lp) for lp in res_py]
             if ldd_failed:
                 res[f] = res_py
-            else:
-                if set(res[f]) != set(res_py):
-                    print(
-                        "WARNING: pyldd disagrees with ldd/otool. This will not cause any"
+            elif set(res[f]) != set(res_py):
+                print(
+                    "WARNING: pyldd disagrees with ldd/otool. This will not cause any"
+                )
+                print("WARNING: problems for this build, but please file a bug at:")
+                print("WARNING: https://github.com/conda/conda-build")
+                print(f"WARNING: and (if possible) attach file {path}")
+                print(
+                    "WARNING: \nldd/otool gives:\n{}\npyldd gives:\n{}\n".format(
+                        "\n".join(str(e) for e in res[f]),
+                        "\n".join(str(e) for e in res_py),
                     )
-                    print("WARNING: problems for this build, but please file a bug at:")
-                    print("WARNING: https://github.com/conda/conda-build")
-                    print(f"WARNING: and (if possible) attach file {path}")
-                    print(
-                        "WARNING: \nldd/otool gives:\n{}\npyldd gives:\n{}\n".format(
-                            "\n".join(str(e) for e in res[f]),
-                            "\n".join(str(e) for e in res_py),
-                        )
-                    )
-                    print(f"Diffs\n{set(res[f]) - set(res_py)}")
-                    print(f"Diffs\n{set(res_py) - set(res[f])}")
+                )
+                print(f"Diffs\n{set(res[f]) - set(res_py)}")
+                print(f"Diffs\n{set(res_py) - set(res[f])}")
     return res
 
 
@@ -105,10 +102,8 @@ def get_package_files(dist, prefix):
     files = []
     if hasattr(dist, "get"):
         files = dist.get("files")
-    else:
-        data = linked_data(prefix).get(dist)
-        if data:
-            files = data.get("files", [])
+    elif data := linked_data(prefix).get(dist):
+        files = data.get("files", [])
     return files
 
 

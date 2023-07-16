@@ -90,14 +90,11 @@ def replace_long_shebang(data):
     # this function only changes a shebang line if it exists and is greater than 127 characters
     if hasattr(data, "encode"):
         data = data.encode()
-    shebang_match = re.match(SHEBANG_REGEX, data, re.MULTILINE)
-    if shebang_match:
+    if shebang_match := re.match(SHEBANG_REGEX, data, re.MULTILINE):
         whole_shebang, executable, options = shebang_match.groups()
         if len(whole_shebang) > 127:
             executable_name = executable.decode("utf-8").split("/")[-1]
-            new_shebang = "#!/usr/bin/env {}{}".format(
-                executable_name, options.decode("utf-8")
-            )
+            new_shebang = f'#!/usr/bin/env {executable_name}{options.decode("utf-8")}'
             data = data.replace(whole_shebang, new_shebang.encode("utf-8"))
     if hasattr(data, "decode"):
         data = data.decode()
@@ -108,21 +105,21 @@ def create_script(fn):
     src = join(THIS_DIR, "python-scripts", fn)
     dst = join(BIN_DIR, fn)
     if sys.platform == "win32":
-        shutil.copy2(src, dst + "-script.py")
-        FILES.append("Scripts/%s-script.py" % fn)
+        shutil.copy2(src, f"{dst}-script.py")
+        FILES.append(f"Scripts/{fn}-script.py")
         shutil.copy2(
-            join(THIS_DIR, "cli-%d.exe" % (8 * tuple.__itemsize__)), dst + ".exe"
+            join(THIS_DIR, "cli-%d.exe" % (8 * tuple.__itemsize__)),
+            f"{dst}.exe",
         )
-        FILES.append("Scripts/%s.exe" % fn)
+        FILES.append(f"Scripts/{fn}.exe")
     else:
-        with open(src) as fi:
-            data = fi.read()
+        data = Path(src).read_text()
         with open(dst, "w") as fo:
             shebang = replace_long_shebang("#!%s\n" % normpath(sys.executable))
             fo.write(shebang)
             fo.write(data)
         os.chmod(dst, 0o775)
-        FILES.append("bin/%s" % fn)
+        FILES.append(f"bin/{fn}")
 
 
 def create_scripts(files):
@@ -139,7 +136,7 @@ def main():
     link_files("site-packages", SITE_PACKAGES, DATA["site-packages"])
     link_files("Examples", "Examples", DATA["Examples"])
 
-    with open(join(PREFIX, "conda-meta", "%s.files" % DATA["dist"]), "w") as fo:
+    with open(join(PREFIX, "conda-meta", f'{DATA["dist"]}.files'), "w") as fo:
         for f in FILES:
             fo.write("%s\n" % f)
 

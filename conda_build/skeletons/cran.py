@@ -471,18 +471,12 @@ def dict_from_cran_lines(lines):
         if not line:
             continue
         try:
-            if ": " in line:
-                (k, v) = line.split(": ", 1)
-            else:
-                # Sometimes fields are included but left blank, e.g.:
-                #   - Enhances in data.tree
-                #   - Suggests in corpcor
-                (k, v) = line.split(":", 1)
+            (k, v) = line.split(": ", 1) if ": " in line else line.split(":", 1)
         except ValueError:
-            sys.exit("Error: Could not parse metadata (%s)" % line)
+            sys.exit(f"Error: Could not parse metadata ({line})")
         d[k] = v
-        # if k not in CRAN_KEYS:
-        #     print("Warning: Unknown key %s" % k)
+            # if k not in CRAN_KEYS:
+            #     print("Warning: Unknown key %s" % k)
     d["orig_lines"] = lines
     return d
 
@@ -518,24 +512,22 @@ def remove_package_line_continuations(chunk):
 
     for i, line in enumerate(chunk):
         if line.startswith(continuation):
-            line = " " + line.lstrip()
+            line = f" {line.lstrip()}"
             if accumulating_continuations:
                 assert had_continuation
                 continued_line += line
-                chunk[i] = None
             else:
                 accumulating_continuations = True
                 continued_ix = i - 1
                 continued_line = chunk[continued_ix] + line
                 had_continuation = True
-                chunk[i] = None
-        else:
-            if accumulating_continuations:
-                assert had_continuation
-                chunk[continued_ix] = continued_line
-                accumulating_continuations = False
-                continued_line = None
-                continued_ix = None
+            chunk[i] = None
+        elif accumulating_continuations:
+            assert had_continuation
+            chunk[continued_ix] = continued_line
+            accumulating_continuations = False
+            continued_line = None
+            continued_ix = None
 
     if had_continuation:
         # Remove the None(s).
@@ -571,7 +563,7 @@ def clear_whitespace(string):
     last_line = ""
     for line in string.splitlines():
         line = line.rstrip()
-        if not (line == "" and last_line == ""):
+        if line != "" or last_line != "":
             lines.append(line)
         last_line = line
     return "\n".join(lines)
@@ -587,7 +579,7 @@ def read_description_contents(fp):
 
 def get_archive_metadata(path, verbose=True):
     if verbose:
-        print("Reading package metadata from %s" % path)
+        print(f"Reading package metadata from {path}")
     if basename(path) == "DESCRIPTION":
         with open(path, "rb") as fp:
             return read_description_contents(fp)
@@ -604,8 +596,8 @@ def get_archive_metadata(path, verbose=True):
                     fp = zf.open(member, "r")
                     return read_description_contents(fp)
     else:
-        sys.exit("Cannot extract a DESCRIPTION from file %s" % path)
-    sys.exit("%s does not seem to be a CRAN package (no DESCRIPTION) file" % path)
+        sys.exit(f"Cannot extract a DESCRIPTION from file {path}")
+    sys.exit(f"{path} does not seem to be a CRAN package (no DESCRIPTION) file")
 
 
 def get_latest_git_tag(config):
@@ -628,12 +620,12 @@ def get_latest_git_tag(config):
     stdout = stdout.decode("utf-8")
     stderr = stderr.decode("utf-8")
     if stderr or p.returncode:
-        sys.exit("Error: git tag failed (%s)" % stderr)
+        sys.exit(f"Error: git tag failed ({stderr})")
     tags = stdout.strip().splitlines()
     if not tags:
         sys.exit("Error: no tags found")
 
-    print("Using tag %s" % tags[-1])
+    print(f"Using tag {tags[-1]}")
     return tags[-1]
 
 
@@ -668,12 +660,12 @@ def get_session(output_dir, verbose=True):
 def get_cran_archive_versions(cran_url, session, package, verbose=True):
     if verbose:
         print(f"Fetching archived versions for package {package} from {cran_url}")
-    r = session.get(cran_url + "/src/contrib/Archive/" + package + "/")
+    r = session.get(f"{cran_url}/src/contrib/Archive/{package}/")
     try:
         r.raise_for_status()
     except requests.exceptions.HTTPError as e:
         if e.response.status_code == 404:
-            print("No archive directory for package %s" % package)
+            print(f"No archive directory for package {package}")
             return []
         raise
     versions = []
@@ -688,15 +680,15 @@ def get_cran_archive_versions(cran_url, session, package, verbose=True):
 
 def get_cran_index(cran_url, session, verbose=True):
     if verbose:
-        print("Fetching main index from %s" % cran_url)
-    r = session.get(cran_url + "/src/contrib/")
+        print(f"Fetching main index from {cran_url}")
+    r = session.get(f"{cran_url}/src/contrib/")
     r.raise_for_status()
     records = {}
     for p in re.findall(r'<td><a href="([^"]+)">\1</a></td>', r.text):
         if p.endswith(".tar.gz") and "_" in p:
             name, version = p.rsplit(".", 2)[0].split("_", 1)
             records[name.lower()] = (name, version)
-    r = session.get(cran_url + "/src/contrib/Archive/")
+    r = session.get(f"{cran_url}/src/contrib/Archive/")
     r.raise_for_status()
     for p in re.findall(r'<td><a href="([^"]+)/">\1/</a></td>', r.text):
         if re.match(r"^[A-Za-z]", p):
@@ -712,28 +704,25 @@ def make_array(m, key, allow_empty=False):
         old_vals = []
     if old_vals or allow_empty:
         result.append(key.split("/")[-1] + ":")
-    for old_val in old_vals:
-        result.append(f"{INDENT}{old_val}")
+    result.extend(f"{INDENT}{old_val}" for old_val in old_vals)
     return result
 
 
 def existing_recipe_dir(output_dir, output_suffix, package, version):
     result = None
     if version:
-        package = package + "-" + version.replace("-", "_")
+        package = f"{package}-" + version.replace("-", "_")
     if exists(join(output_dir, package)):
         result = normpath(join(output_dir, package))
     elif exists(join(output_dir, package + output_suffix)):
         result = normpath(join(output_dir, package + output_suffix))
-    elif exists(join(output_dir, "r-" + package + output_suffix)):
-        result = normpath(join(output_dir, "r-" + package + output_suffix))
+    elif exists(join(output_dir, f"r-{package}{output_suffix}")):
+        result = normpath(join(output_dir, f"r-{package}{output_suffix}"))
     return result
 
 
 def strip_end(string, end):
-    if string.endswith(end):
-        return string[: -len(end)]
-    return string
+    return string[: -len(end)] if string.endswith(end) else string
 
 
 def package_to_inputs_dict(output_dir, output_suffix, git_tag, package, version=None):
@@ -763,7 +752,7 @@ def package_to_inputs_dict(output_dir, output_suffix, git_tag, package, version=
     """
     if isfile(package):
         return None
-    print("Parsing input package %s:" % package)
+    print(f"Parsing input package {package}:")
     package = strip_end(package, "/")
     package = strip_end(package, sep)
     if "github.com" in package:
@@ -777,26 +766,24 @@ def package_to_inputs_dict(output_dir, output_suffix, git_tag, package, version=
     if package.startswith("file://"):
         location = package.replace("file://", "")
         pkg_filename = basename(location)
-        pkg_name = re.match(r"(.*)_(.*)", pkg_filename).group(1).lower()
+        pkg_name = re.match(r"(.*)_(.*)", pkg_filename)[1].lower()
         existing_location = existing_recipe_dir(
-            output_dir, output_suffix, "r-" + pkg_name, version
+            output_dir, output_suffix, f"r-{pkg_name}", version
         )
     elif isabs(package):
         commp = commonprefix((package, output_dir))
         if commp != output_dir:
             raise RuntimeError(
-                "package {} specified with abs path outside of output-dir {}".format(
-                    package, output_dir
-                )
+                f"package {package} specified with abs path outside of output-dir {output_dir}"
             )
         location = package
         existing_location = existing_recipe_dir(
-            output_dir, output_suffix, "r-" + pkg_name, version
+            output_dir, output_suffix, f"r-{pkg_name}", version
         )
     elif "github.com" in package:
         location = package
         existing_location = existing_recipe_dir(
-            output_dir, output_suffix, "r-" + pkg_name, version
+            output_dir, output_suffix, f"r-{pkg_name}", version
         )
     else:
         location = existing_location = existing_recipe_dir(
@@ -821,7 +808,7 @@ def package_to_inputs_dict(output_dir, output_suffix, git_tag, package, version=
             old_git_rev = m.get_value("source/git_rev", None)
 
     vstr = "-" + version.replace("-", "_") if version else ""
-    new_location = join(output_dir, "r-" + pkg_name + vstr + output_suffix)
+    new_location = join(output_dir, f"r-{pkg_name}{vstr}{output_suffix}")
     print(f".. name: {pkg_name} location: {location} new_location: {new_location}")
 
     return {
@@ -835,7 +822,7 @@ def package_to_inputs_dict(output_dir, output_suffix, git_tag, package, version=
 
 
 def get_available_binaries(cran_url, details):
-    url = cran_url + "/" + details["dir"]
+    url = f"{cran_url}/" + details["dir"]
     response = requests.get(url)
     response.raise_for_status()
     ext = details["ext"]

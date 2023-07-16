@@ -117,7 +117,7 @@ class UndefinedNeverFail(jinja2.Undefined):
         try:
             return object.__getattr__(self, k)
         except AttributeError:
-            self._return_undefined(self._undefined_name + "." + k)
+            self._return_undefined(f"{self._undefined_name}.{k}")
 
     # Unlike the methods above, Python requires that these
     # few methods must always return the correct type
@@ -223,8 +223,7 @@ def load_setup_py_data(
                 )
             else:
                 raise CondaBuildException(
-                    "Could not render recipe - need modules "
-                    'installed in root env.  Import error was "{}"'.format(e)
+                    f'Could not render recipe - need modules installed in root env.  Import error was "{e}"'
                 )
     # cleanup: we must leave the source tree empty unless the source code is already present
     rm_rf(os.path.join(m.config.work_dir, "_load_setup_py_data.py"))
@@ -340,30 +339,28 @@ def pin_compatible(
                     host_pins, _, _ = get_env_dependencies(m, "host", m.config.variant)
                     pins.extend(host_pins)
             cached_env_dependencies[key] = pins
-        versions = {p.split(" ")[0]: p.split(" ")[1:] for p in pins}
-        if versions:
+        if versions := {p.split(" ")[0]: p.split(" ")[1:] for p in pins}:
             if exact and versions.get(package_name):
                 compatibility = " ".join(versions[package_name])
-            else:
-                version = lower_bound or versions.get(package_name)
-                if version:
-                    if hasattr(version, "__iter__") and not isinstance(version, str):
-                        version = version[0]
-                    else:
-                        version = str(version)
-                    if upper_bound:
-                        if min_pin or lower_bound:
-                            compatibility = ">=" + str(version) + ","
-                        compatibility += f"<{upper_bound}"
-                    else:
-                        compatibility = apply_pin_expressions(version, min_pin, max_pin)
+            elif version := lower_bound or versions.get(package_name):
+                version = (
+                    version[0]
+                    if hasattr(version, "__iter__")
+                    and not isinstance(version, str)
+                    else str(version)
+                )
+                if upper_bound:
+                    if min_pin or lower_bound:
+                        compatibility = f">={str(version)},"
+                    compatibility += f"<{upper_bound}"
+                else:
+                    compatibility = apply_pin_expressions(version, min_pin, max_pin)
 
     if not compatibility and not permit_undefined_jinja and not bypass_env_check:
-        check = re.compile(r"pin_compatible\s*\(\s*[" '"]{}[' '"]'.format(package_name))
+        check = re.compile(f'pin_compatible\s*\(\s*["]{package_name}["]')
         if check.search(m.extract_requirements_text()):
             raise RuntimeError(
-                "Could not get compatibility information for {} package.  "
-                "Is it one of your host dependencies?".format(package_name)
+                f"Could not get compatibility information for {package_name} package.  Is it one of your host dependencies?"
             )
     return (
         " ".join((package_name, compatibility))
@@ -407,22 +404,18 @@ def pin_subpackage_against_outputs(
             sp_m = outputs[key][1]
             if permit_undefined_jinja and not sp_m.version():
                 pin = None
-            else:
-                if exact:
-                    pin = " ".join(
-                        [
-                            sp_m.name(),
-                            sp_m.version(),
-                            sp_m.build_id()
-                            if not skip_build_id
-                            else str(sp_m.build_number()),
-                        ]
-                    )
-                else:
-                    pin = "{} {}".format(
+            elif exact:
+                pin = " ".join(
+                    [
                         sp_m.name(),
-                        apply_pin_expressions(sp_m.version(), min_pin, max_pin),
-                    )
+                        sp_m.version(),
+                        sp_m.build_id()
+                        if not skip_build_id
+                        else str(sp_m.build_number()),
+                    ]
+                )
+            else:
+                pin = f"{sp_m.name()} {apply_pin_expressions(sp_m.version(), min_pin, max_pin)}"
         else:
             pin = matching_package_keys[0][0]
     return pin
@@ -445,15 +438,7 @@ def pin_subpackage(
     """
     pin = None
 
-    if not hasattr(metadata, "other_outputs"):
-        if allow_no_other_outputs:
-            pin = subpackage_name
-        else:
-            raise ValueError(
-                "Bug in conda-build: we need to have info about other outputs in "
-                "order to allow pinning to them.  It's not here."
-            )
-    else:
+    if hasattr(metadata, "other_outputs"):
         # two ways to match:
         #    1. only one other output named the same as the subpackage_name from the key
         #    2. whole key matches (both subpackage name and variant)
@@ -469,13 +454,18 @@ def pin_subpackage(
             permit_undefined_jinja,
             skip_build_id=skip_build_id,
         )
+    elif allow_no_other_outputs:
+        pin = subpackage_name
+    else:
+        raise ValueError(
+            "Bug in conda-build: we need to have info about other outputs in "
+            "order to allow pinning to them.  It's not here."
+        )
     if not pin:
         pin = subpackage_name
         if not permit_undefined_jinja and not allow_no_other_outputs:
             raise ValueError(
-                "Didn't find subpackage version info for '{}', which is used in a"
-                " pin_subpackage expression.  Is it actually a subpackage?  If not, "
-                "you want pin_compatible instead.".format(subpackage_name)
+                f"Didn't find subpackage version info for '{subpackage_name}', which is used in a pin_subpackage expression.  Is it actually a subpackage?  If not, you want pin_compatible instead."
             )
     return pin
 
@@ -510,7 +500,7 @@ def compiler(language, config, permit_undefined_jinja=False):
         language_compiler_key = f"{language}_compiler"
         # fall back to native if language-compiler is not explicitly set in variant
         compiler = config.variant.get(language_compiler_key, compiler)
-        version = config.variant.get(language_compiler_key + "_version")
+        version = config.variant.get(f"{language_compiler_key}_version")
     else:
         target_platform = config.subdir
 
@@ -578,7 +568,7 @@ def cdt(package_name, config, permit_undefined_jinja=False):
 
     cdt_name = "cos6"
     arch = config.host_arch or config.arch
-    if arch == "ppc64le" or arch == "aarch64" or arch == "ppc64" or arch == "s390x":
+    if arch in ["ppc64le", "aarch64", "ppc64", "s390x"]:
         cdt_name = "cos7"
         cdt_arch = arch
     else:
@@ -586,13 +576,11 @@ def cdt(package_name, config, permit_undefined_jinja=False):
     if config.variant:
         cdt_name = config.variant.get("cdt_name", cdt_name)
         cdt_arch = config.variant.get("cdt_arch", cdt_arch)
-    if " " in package_name:
-        name = package_name.split(" ")[0]
-        ver_build = package_name.split(" ")[1:]
-        result = name + "-" + cdt_name + "-" + cdt_arch + " " + " ".join(ver_build)
-    else:
-        result = package_name + "-" + cdt_name + "-" + cdt_arch
-    return result
+    if " " not in package_name:
+        return f"{package_name}-{cdt_name}-{cdt_arch}"
+    name = package_name.split(" ")[0]
+    ver_build = package_name.split(" ")[1:]
+    return f"{name}-{cdt_name}-{cdt_arch} " + " ".join(ver_build)
 
 
 def resolved_packages(m, env, permit_undefined_jinja=False, bypass_env_check=False):
@@ -645,10 +633,7 @@ def _toml_load(stream):
     Load .toml from a pathname.
     """
     if isinstance(stream, (TextIOBase, str)):
-        if isinstance(stream, TextIOBase):
-            data = stream.read()
-        else:
-            data = stream
+        data = stream.read() if isinstance(stream, TextIOBase) else stream
         return tomllib.loads(data)
 
     # tomllib prefers binary files
@@ -741,7 +726,7 @@ def context_processor(
         variant=variant,
     )
     environ = dict(os.environ)
-    environ.update(get_environ(m=initial_metadata, skip_build_id=skip_build_id))
+    environ |= get_environ(m=initial_metadata, skip_build_id=skip_build_id)
 
     ctx.update(
         load_setup_py_data=partial(

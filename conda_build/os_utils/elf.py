@@ -27,4 +27,4 @@ def is_elf(path):
         return False
     with open(path, "rb") as fi:
         head = fi.read(4)
-    return bool(head == MAGIC)
+    return head == MAGIC

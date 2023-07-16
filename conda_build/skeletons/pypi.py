@@ -176,14 +176,12 @@ def package_exists(package_name, pypi_url=None):
     if not pypi_url:
         pypi_url = "https://pypi.io/pypi"
     # request code will be 404 if the package does not exist.  Requires exact match.
-    r = requests.get(pypi_url + "/" + package_name, verify=not _ssl_no_verify())
+    r = requests.get(f"{pypi_url}/{package_name}", verify=not _ssl_no_verify())
     return r.status_code != 404
 
 
 def __print_with_indent(line, prefix="", suffix="", level=0, newline=True):
-    output = ""
-    if level:
-        output = " " * level
+    output = " " * level if level else ""
     return output + prefix + line + suffix + ("\n" if newline else "")
 
 
@@ -249,8 +247,8 @@ def _formating_value(attribute_name, attribute_value):
         and pattern_search.search(attribute_value)
         or attribute_name in ["summary", "description", "version", "script"]
     ):
-        return ' "' + str(attribute_value) + '"\n'
-    return " " + str(attribute_value) + "\n"
+        return f' "{str(attribute_value)}' + '"\n'
+    return f" {str(attribute_value)}" + "\n"
 
 
 def skeletonize(
@@ -299,7 +297,7 @@ def skeletonize(
         if not is_url:
             dir_path = join(output_dir, package.lower())
             if exists(dir_path) and not version_compare:
-                raise RuntimeError("directory already exists: %s" % dir_path)
+                raise RuntimeError(f"directory already exists: {dir_path}")
         d = package_dicts.setdefault(
             package,
             {
@@ -314,7 +312,6 @@ def skeletonize(
         if is_url:
             del d["packagename"]
 
-        if is_url:
             d["version"] = "UNKNOWN"
             # Make sure there is always something to pass in for this
             pypi_data = {}
@@ -335,22 +332,17 @@ def skeletonize(
                 version_compare(versions)
             if version:
                 if version not in versions:
-                    sys.exit(
-                        "Error: Version %s of %s is not available on PyPI."
-                        % (version, package)
-                    )
+                    sys.exit(f"Error: Version {version} of {package} is not available on PyPI.")
                 d["version"] = version
             else:
                 # select the most visible version from PyPI.
                 if not versions:
-                    sys.exit(
-                        "Error: Could not find any versions of package %s" % package
-                    )
+                    sys.exit(f"Error: Could not find any versions of package {package}")
                 if len(versions) > 1:
-                    print("Warning, the following versions were found for %s" % package)
+                    print(f"Warning, the following versions were found for {package}")
                     for ver in versions:
                         print(ver)
-                    print("Using %s" % versions[-1])
+                    print(f"Using {versions[-1]}")
                     print("Use --version to specify a different version.")
                 d["version"] = versions[-1]
 
@@ -393,8 +385,9 @@ def skeletonize(
         if pin_numpy:
             for depends in ["build_depends", "run_depends"]:
                 deps = d[depends]
-                numpy_dep = [idx for idx, dep in enumerate(deps) if "numpy" in dep]
-                if numpy_dep:
+                if numpy_dep := [
+                    idx for idx, dep in enumerate(deps) if "numpy" in dep
+                ]:
                     # Turns out this needs to be inserted before the rest
                     # of the numpy spec.
                     deps.insert(numpy_dep[0], "numpy x.x")
@@ -404,7 +397,7 @@ def skeletonize(
         d = package_dicts[package]
         name = d["packagename"].lower()
         makedirs(join(output_dir, name))
-        print("Writing recipe for %s" % package.lower())
+        print(f"Writing recipe for {package.lower()}")
         with open(join(output_dir, name, "meta.yaml"), "w") as f:
             rendered_recipe = PYPI_META_HEADER.format(**d)
 
@@ -480,10 +473,9 @@ def skeletonize(
             # Fix the indents
             recipe_lines = []
             for line in rendered_recipe.splitlines():
-                match = re.search(r"^\s+(-) ", line, flags=re.MULTILINE)
-                if match:
+                if match := re.search(r"^\s+(-) ", line, flags=re.MULTILINE):
                     pre, sep, post = line.partition("-")
-                    sep = "  " + sep
+                    sep = f"  {sep}"
                     line = pre + sep + post
                 recipe_lines.append(line)
             rendered_recipe = "\n".join(recipe_lines)
@@ -627,7 +619,7 @@ def get_download_data(
 
     # PyPI will typically have several downloads (source, wheels) for one
     # package/version.
-    urls = [url for url in pypi_data["releases"][version]] if not is_url else [package]
+    urls = list(pypi_data["releases"][version]) if not is_url else [package]
 
     if not is_url and not all_urls:
         # Try to find source urls
@@ -650,9 +642,9 @@ def get_download_data(
             fragment = U.fragment or ""
             digest = fragment.split("=")
         else:
-            sys.exit("Error: No source urls found for %s" % package)
+            sys.exit(f"Error: No source urls found for {package}")
     if len(urls) > 1 and not noprompt:
-        print("More than one source version is available for %s:" % package)
+        print(f"More than one source version is available for {package}:")
         if manual_url:
             for i, url in enumerate(urls):
                 print(
@@ -671,11 +663,7 @@ def get_download_data(
         # Found a location from PyPI.
         url = urls[n]
         pypiurl = url["url"]
-        print(
-            "Using url {} ({}) for {}.".format(
-                pypiurl, human_bytes(url["size"] or 0), package
-            )
-        )
+        print(f'Using url {pypiurl} ({human_bytes(url["size"] or 0)}) for {package}.')
 
         if url["digests"]["sha256"]:
             digest = ("sha256", url["digests"]["sha256"])
@@ -687,7 +675,7 @@ def get_download_data(
         filename = url["filename"] or "package"
     else:
         # User provided a URL, try to use it.
-        print("Using url %s" % package)
+        print(f"Using url {package}")
         pypiurl = package
         U = parse_url(package)
         digest = U.fragment.split("=")
@@ -709,7 +697,7 @@ def version_compare(package, versions):
 
     recipe_dir = abspath(package.lower())
     if not isdir(recipe_dir):
-        sys.exit("Error: no such directory: %s" % recipe_dir)
+        sys.exit(f"Error: no such directory: {recipe_dir}")
     m = MetaData(recipe_dir)
     local_version = nv(m.version())
     print(f"Local recipe for {package} has version {local_version}")
@@ -719,11 +707,11 @@ def version_compare(package, versions):
         # Comparing normalized versions, displaying non normalized ones
         new_versions = versions[: norm_versions.index(local_version)]
         if len(new_versions) > 0:
-            print("Following new versions of %s are avaliable" % (package))
+            print(f"Following new versions of {package} are avaliable")
             for ver in new_versions:
                 print(ver)
         else:
-            print("No new version for %s is available" % (package))
+            print(f"No new version for {package} is available")
         sys.exit()
 
 
@@ -737,8 +725,7 @@ def convert_version(version):
     max_ver_len = len(version_parts) - 2
     version_parts[max_ver_len] = int(version_parts[max_ver_len]) + 1
     max_pin = ".".join(str(v) for v in version_parts[: max_ver_len + 1])
-    pin_compatible = f" >={version},<{max_pin}"
-    return pin_compatible
+    return f" >={version},<{max_pin}"
 
 
 MARKER_RE = re.compile(
@@ -773,14 +760,14 @@ def _translate_platform_system_constraint(constraint):
         "Darwin": "osx",
         "Windows": "win",
     }.get(value, value.lower())
-    return "{}{}".format("not " if operator == "!=" else "", system)
+    return f'{"not " if operator == "!=" else ""}{system}'
 
 
 def _translate_sys_platform_constraint(constraint):
     operator, value = _get_env_marker_operator_and_value(constraint)
     # Only take the "letter" part to translate, e.g., "linux2"->"linux", "win32"->"win".
     system = re.match("^[a-z]*", value, re.I)[0]
-    return "{}{}".format("not " if operator == "!=" else "", system)
+    return f'{"not " if operator == "!=" else ""}{system}'
 
 
 def env_mark_lookup(env_mark_name, env_mark_constraint):
@@ -794,7 +781,7 @@ def env_mark_lookup(env_mark_name, env_mark_constraint):
         "sys_platform": _translate_sys_platform_constraint,
     }
     marker = env_mark_table[env_mark_name](env_mark_constraint)
-    return "  # [ " + marker + " ]"
+    return f"  # [ {marker} ]"
 
 
 def parse_dep_with_env_marker(dep_str):
@@ -826,7 +813,7 @@ def get_package_metadata(
     config,
     setup_options,
 ):
-    print("Downloading %s" % package)
+    print(f"Downloading {package}")
     print("PyPI URL: ", metadata["pypiurl"])
     pkginfo = get_pkginfo(
         package,
@@ -924,7 +911,7 @@ def get_dependencies(requires, setuptools_enabled=True):
         m = spec_pat.match(_strip_comment(line))
         if m is None:
             return None
-        name, cc, pc = (m.group("name").lower(), m.group("cc"), m.group("pc"))
+        name, cc, pc = m["name"].lower(), m["cc"], m["pc"]
         if cc:
             return name + cc.replace("=", " ")
         elif pc:
@@ -935,9 +922,9 @@ def get_dependencies(requires, setuptools_enabled=True):
                 assert pc.count("."), f"No '.' in 'Compatible release' version {line}"
                 ver = pc.replace("~= ", "")
                 ver2 = ".".join(ver.split(".")[:-1]) + ".*"
-                return name + " >=" + ver + ",==" + ver2
+                return f"{name} >={ver},=={ver2}"
             else:
-                return name + " " + pc.replace(" ", "")
+                return f"{name} " + pc.replace(" ", "")
         else:
             return name
 
@@ -980,7 +967,7 @@ def get_dependencies(requires, setuptools_enabled=True):
                     )
                     spec = _spec_from_line(dep_orig)
                 if spec is None:
-                    sys.exit("Error: Could not parse: %s" % dep)
+                    sys.exit(f"Error: Could not parse: {dep}")
 
             if marker:
                 spec = " ".join((spec, marker))
@@ -1010,12 +997,10 @@ def get_tests_require(pkginfo):
 
 
 def get_home(pkginfo, data=None):
-    default_home = "The package home page"
     if pkginfo.get("home"):
         return pkginfo["home"]
-    if data:
-        return data.get("home", default_home)
-    return default_home
+    default_home = "The package home page"
+    return data.get("home", default_home) if data else default_home
 
 
 def get_summary(pkginfo):
@@ -1036,13 +1021,11 @@ def get_license_name(package, pkginfo, no_prompt=False, data=None):
     pkg_classifier = pkginfo.get("classifiers", data_classifier)
     pkg_classifier = pkg_classifier if pkg_classifier else data_classifier
 
-    licenses = [
+    if licenses := [
         classifier.split(license_classifier, 1)[1]
         for classifier in pkg_classifier
         if classifier.startswith(license_classifier)
-    ]
-
-    if licenses:
+    ]:
         return " or ".join(licenses)
 
     if pkginfo.get("license"):
@@ -1056,10 +1039,10 @@ def get_license_name(package, pkginfo, no_prompt=False, data=None):
         if no_prompt:
             return license_name
         elif "\n" not in license_name:
-            print('Using "%s" for the license' % license_name)
+            print(f'Using "{license_name}" for the license')
         else:
             # Some projects put the whole license text in this field
-            print("This is the license for %s" % package)
+            print(f"This is the license for {package}")
             print()
             print(license_name)
             print()
@@ -1068,8 +1051,7 @@ def get_license_name(package, pkginfo, no_prompt=False, data=None):
         license_name = "UNKNOWN"
     else:
         license_name = input(
-            "No license could be found for %s on PyPI or in the source. "
-            "What license should I use? " % package
+            f"No license could be found for {package} on PyPI or in the source. What license should I use? "
         )
     return license_name
 
@@ -1102,21 +1084,19 @@ def get_entry_points(pkginfo):
             print("WARNING: entry-points not understood: ", err)
             print("The string was", newstr)
         else:
-            entry_points = {}
-            for section in _config.sections():
-                if section in ["console_scripts", "gui_scripts"]:
-                    entry_points[section] = [
-                        f"{option}={_config.get(section, option)}"
-                        for option in _config.options(section)
-                    ]
-
+            entry_points = {
+                section: [
+                    f"{option}={_config.get(section, option)}"
+                    for option in _config.options(section)
+                ]
+                for section in _config.sections()
+                if section in ["console_scripts", "gui_scripts"]
+            }
     if isinstance(entry_points, dict):
         console_script = convert_to_flat_list(entry_points.get("console_scripts", []))
         gui_scripts = convert_to_flat_list(entry_points.get("gui_scripts", []))
 
-        # TODO: Use pythonw for gui scripts
-        entry_list = console_script + gui_scripts
-        if entry_list:
+        if entry_list := console_script + gui_scripts:
             return {
                 "entry_points": entry_list,
                 "test_commands": make_entry_tests(entry_list),
@@ -1142,7 +1122,7 @@ def convert_to_flat_list(var_scripts):
         and isinstance(var_scripts, list)
         and isinstance(var_scripts[0], list)
     ):
-        var_scripts = [item for sublist in [s for s in var_scripts] for item in sublist]
+        var_scripts = [item for sublist in list(var_scripts) for item in sublist]
     return var_scripts
 
 
@@ -1157,9 +1137,7 @@ def is_setuptools_enabled(pkginfo):
 
     # We have *other* kinds of entry-points so we need
     # setuptools at run-time
-    if set(entry_points.keys()) - {"console_scripts", "gui_scripts"}:
-        return True
-    return False
+    return bool(set(entry_points.keys()) - {"console_scripts", "gui_scripts"})
 
 
 def valid(name):
@@ -1173,7 +1151,7 @@ def unpack(src_path, tempdir):
     if src_path.lower().endswith(decompressible_exts):
         tar_xf(src_path, tempdir)
     else:
-        raise Exception("not a valid source: %s" % src_path)
+        raise Exception(f"not a valid source: {src_path}")
 
 
 def get_dir(tempdir):
@@ -1192,9 +1170,7 @@ def get_dir(tempdir):
 
 
 def get_requirements(package, pkginfo, all_extras=True):
-    # Look for package[extra,...] features spec:
-    match_extras = re.match(r"^([^[]+)\[([^]]+)\]$", package)
-    if match_extras:
+    if match_extras := re.match(r"^([^[]+)\[([^]]+)\]$", package):
         package, extras = match_extras.groups()
         extras = extras.split(",")
     else:
@@ -1207,31 +1183,30 @@ def get_requirements(package, pkginfo, all_extras=True):
         try:
             extras_require = [pkginfo["extras_require"][x] for x in extras]
         except KeyError:
-            sys.exit("Error: Invalid extra features: [%s]" % ",".join(extras))
+            sys.exit(f'Error: Invalid extra features: [{",".join(extras)}]')
         # match PEP 508 environment markers; currently only matches the
         #  subset of environment markers that compare to python_version
         #  using a single basic Python comparison operator
         version_marker = re.compile(r"^:python_version(<|<=|!=|==|>=|>)(.+)$")
         for extra in pkginfo["extras_require"]:
-            match_ver_mark = version_marker.match(extra)
-            if match_ver_mark:
+            if match_ver_mark := version_marker.match(extra):
                 op, ver = match_ver_mark.groups()
                 try:
                     ver_tuple = tuple(int(x) for x in ver.strip("'\"").split("."))
                 except ValueError:
                     pass  # bad match; abort
                 else:
-                    if op == "<":
+                    if op == "!=":
+                        satisfies_ver = sys.version_info != ver_tuple
+                    elif op == "<":
                         satisfies_ver = sys.version_info < ver_tuple
                     elif op == "<=":
                         satisfies_ver = sys.version_info <= ver_tuple
-                    elif op == "!=":
-                        satisfies_ver = sys.version_info != ver_tuple
                     elif op == "==":
                         satisfies_ver = sys.version_info == ver_tuple
                     elif op == ">=":
                         satisfies_ver = sys.version_info >= ver_tuple
-                    else:  # op == ">":
+                    else:
                         satisfies_ver = sys.version_info > ver_tuple
                     if satisfies_ver:
                         extras_require += pkginfo["extras_require"][extra]

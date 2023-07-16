@@ -48,10 +48,10 @@ def write_to_conda_pth(sp_dir, pkg_path):
 
         # only append pkg_path if it doesn't already exist in conda.pth
         if pkg_path + "\n" in pkgs_in_dev_mode:
-            print("path exists, skipping " + pkg_path)
+            print(f"path exists, skipping {pkg_path}")
         else:
             f.write(pkg_path + "\n")
-            print("added " + pkg_path)
+            print(f"added {pkg_path}")
 
 
 def get_setup_py(path_):
@@ -115,11 +115,11 @@ def _uninstall(sp_dir, pkg_path):
                 if line != pkg_path + "\n":
                     new_c.write(line)
                 else:
-                    print("uninstalled: " + pkg_path)
+                    print(f"uninstalled: {pkg_path}")
                     found = True
 
     if not found:
-        print("conda.pth does not contain path: " + pkg_path)
+        print(f"conda.pth does not contain path: {pkg_path}")
         print("package not installed via conda develop")
 
     shutil.move(n_c_pth, o_c_pth)
@@ -163,14 +163,14 @@ Error: environment does not exist: %s
 
         if clean or build_ext:
             setup_py = get_setup_py(pkg_path)
-            if clean:
-                _clean(setup_py)
-                if not build_ext:
-                    return
+        if clean:
+            _clean(setup_py)
+            if not build_ext:
+                return
 
-            # build extensions before adding to conda.pth
-            if build_ext:
-                _build_ext(setup_py)
+        # build extensions before adding to conda.pth
+        if build_ext:
+            _build_ext(setup_py)
 
         if not no_pth_file:
             write_to_conda_pth(sp_dir, pkg_path)
@@ -178,4 +178,4 @@ Error: environment does not exist: %s
         # go through the source looking for compiled extensions and make sure
         # they use the conda environment for loading libraries at runtime
         relink_sharedobjects(pkg_path, prefix)
-        print("completed operation for: " + pkg_path)
+        print(f"completed operation for: {pkg_path}")

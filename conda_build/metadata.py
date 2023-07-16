@@ -95,14 +95,14 @@ def get_selectors(config: Config) -> dict[str, bool]:
     plat = config.host_subdir
     d = dict(
         linux=plat.startswith("linux-"),
-        linux32=bool(plat == "linux-32"),
-        linux64=bool(plat == "linux-64"),
+        linux32=plat == "linux-32",
+        linux64=plat == "linux-64",
         arm=plat.startswith("linux-arm"),
         osx=plat.startswith("osx-"),
         unix=plat.startswith(("linux-", "osx-")),
         win=plat.startswith("win-"),
-        win32=bool(plat == "win-32"),
-        win64=bool(plat == "win-64"),
+        win32=plat == "win-32",
+        win64=plat == "win-64",
         x86=plat.endswith(("-32", "-64")),
         x86_64=plat.endswith("-64"),
         os=os,
@@ -121,18 +121,16 @@ def get_selectors(config: Config) -> dict[str, bool]:
 
     d["build_platform"] = config.build_subdir
 
-    d.update(
-        dict(
-            py=py,
-            py3k=bool(30 <= py < 40),
-            py2k=bool(20 <= py < 30),
-            py26=bool(py == 26),
-            py27=bool(py == 27),
-            py33=bool(py == 33),
-            py34=bool(py == 34),
-            py35=bool(py == 35),
-            py36=bool(py == 36),
-        )
+    d |= dict(
+        py=py,
+        py3k=30 <= py < 40,
+        py2k=20 <= py < 30,
+        py26=py == 26,
+        py27=py == 27,
+        py33=py == 33,
+        py34=py == 34,
+        py35=py == 35,
+        py36=py == 36,
     )
 
     np = config.variant.get("numpy")
@@ -140,8 +138,7 @@ def get_selectors(config: Config) -> dict[str, bool]:
         np = defaults["numpy"]
         if config.verbose:
             utils.get_logger(__name__).warn(
-                "No numpy version specified in conda_build_config.yaml.  "
-                "Falling back to default numpy value of {}".format(defaults["numpy"])
+                f'No numpy version specified in conda_build_config.yaml.  Falling back to default numpy value of {defaults["numpy"]}'
             )
     d["np"] = int("".join(np.split(".")[:2]))
 
@@ -150,14 +147,14 @@ def get_selectors(config: Config) -> dict[str, bool]:
 
     lua = config.variant.get("lua", defaults["lua"])
     d["lua"] = lua
-    d["luajit"] = bool(lua[0] == "2")
+    d["luajit"] = lua[0] == "2"
 
     for machine in non_x86_linux_machines:
-        d[machine] = bool(plat.endswith("-%s" % machine))
+        d[machine] = bool(plat.endswith(f"-{machine}"))
 
     for feature, value in feature_list:
         d[feature] = value
-    d.update(os.environ)
+    d |= os.environ
 
     # here we try to do some type conversion for more intuitive usage.  Otherwise,
     #    values like 35 are strings by default, making relational operations confusing.
@@ -199,10 +196,7 @@ sel_pat = re.compile(r"(.+?)\s*(#.*)?\[([^\[\]]+)\](?(2)[^\(\)]*)$")
 #    returned
 def parseNameNotFound(error):
     m = re.search("'(.+?)'", str(error))
-    if len(m.groups()) == 1:
-        return m.group(1)
-    else:
-        return ""
+    return m[1] if len(m.groups()) == 1 else ""
 
 
 # We evaluate the selector and return True (keep this line) or False (drop this line)
@@ -217,9 +211,7 @@ def eval_selector(selector_string, namespace, variants_in_place):
         missing_var = parseNameNotFound(e)
         if variants_in_place:
             log = utils.get_logger(__name__)
-            log.debug(
-                "Treating unknown selector '" + missing_var + "' as if it was False."
-            )
+            log.debug(f"Treating unknown selector '{missing_var}' as if it was False.")
         next_string = selector_string.replace(missing_var, "False")
         return eval_selector(next_string, namespace, variants_in_place)
 
@@ -237,8 +229,7 @@ def select_lines(data, namespace, variants_in_place):
         if line.lstrip().startswith("#"):
             # Don't bother with comment only lines
             continue
-        m = sel_pat.match(line)
-        if m:
+        if m := sel_pat.match(line):
             cond = m.group(3)
             try:
                 if eval_selector(cond, namespace, variants_in_place):
@@ -281,7 +272,7 @@ def ensure_valid_fields(meta):
     pin_depends = meta.get("build", {}).get("pin_depends", "")
     if pin_depends and pin_depends not in ("", "record", "strict"):
         raise RuntimeError(
-            "build/pin_depends must be 'record' or 'strict' - " "not '%s'" % pin_depends
+            f"build/pin_depends must be 'record' or 'strict' - not '{pin_depends}'"
         )
 
 
@@ -298,18 +289,14 @@ def _trim_None_strings(meta_dict):
                 keep = []
                 if hasattr(next(iter(value)), "keys"):
                     for d in value:
-                        trimmed_dict = _trim_None_strings(d)
-                        if trimmed_dict:
+                        if trimmed_dict := _trim_None_strings(d):
                             keep.append(trimmed_dict)
-                # support lists of strings (homogeneous)
                 else:
                     keep = [i for i in value if i not in ("None", "NoneType")]
                 meta_dict[key] = keep
         else:
             log.debug(
-                "found unrecognized data type in dictionary: {}, type: {}".format(
-                    value, type(value)
-                )
+                f"found unrecognized data type in dictionary: {value}, type: {type(value)}"
             )
     return meta_dict
 
@@ -318,7 +305,7 @@ def ensure_valid_noarch_value(meta):
     build_noarch = meta.get("build", {}).get("noarch")
     if build_noarch and build_noarch not in NOARCH_TYPES:
         raise exceptions.CondaBuildException(
-            "Invalid value for noarch: %s" % build_noarch
+            f"Invalid value for noarch: {build_noarch}"
         )
 
 
@@ -338,15 +325,18 @@ def check_circular_dependencies(render_order, config=None):
         envs = ("build", "host", "run")
     pairs = []
     for idx, m in enumerate(render_order.values()):
-        for other_m in list(render_order.values())[idx + 1 :]:
+        pairs.extend(
+            (m.name(), other_m.name())
+            for other_m in list(render_order.values())[idx + 1 :]
             if any(
-                m.name() == dep or dep.startswith(m.name() + " ")
+                m.name() == dep or dep.startswith(f"{m.name()} ")
                 for dep in _get_all_dependencies(other_m, envs=envs)
-            ) and any(
-                other_m.name() == dep or dep.startswith(other_m.name() + " ")
+            )
+            and any(
+                other_m.name() == dep or dep.startswith(f"{other_m.name()} ")
                 for dep in _get_all_dependencies(m, envs=envs)
-            ):
-                pairs.append((m.name(), other_m.name()))
+            )
+        )
     if pairs:
         error = "Circular dependencies in recipe: \n"
         for pair in pairs:
@@ -355,14 +345,13 @@ def check_circular_dependencies(render_order, config=None):
 
 
 def _variants_equal(metadata, output_metadata):
-    match = True
-    for key, val in metadata.config.variant.items():
-        if (
+    return not any(
+        (
             key in output_metadata.config.variant
             and val != output_metadata.config.variant[key]
-        ):
-            match = False
-    return match
+        )
+        for key, val in metadata.config.variant.items()
+    )
 
 
 def ensure_matching_hashes(output_metadata):
@@ -380,21 +369,21 @@ def ensure_matching_hashes(output_metadata):
                         )
                     run_exports = run_exports_list
                 deps = _get_all_dependencies(om, envs) + run_exports
-                for dep in deps:
-                    if (
-                        dep.startswith(m.name() + " ")
-                        and len(dep.split(" ")) == 3
-                        and dep.split(" ")[-1] != m.build_id()
-                        and _variants_equal(m, om)
-                    ):
-                        problemos.append((m.name(), m.build_id(), dep, om.name()))
-
+                problemos.extend(
+                    (m.name(), m.build_id(), dep, om.name())
+                    for dep in deps
+                    if dep.startswith(f"{m.name()} ")
+                    and len(dep.split(" ")) == 3
+                    and dep.split(" ")[-1] != m.build_id()
+                    and _variants_equal(m, om)
+                )
     if problemos:
-        error = ""
-        for prob in problemos:
-            error += "Mismatching package: {} (id {}); dep: {}; consumer package: {}\n".format(
+        error = "".join(
+            "Mismatching package: {} (id {}); dep: {}; consumer package: {}\n".format(
                 *prob
             )
+            for prob in problemos
+        )
         raise exceptions.RecipeError(
             "Mismatching hashes in recipe. Exact pins in dependencies "
             "that contribute to the hash often cause this. Can you "
@@ -429,12 +418,10 @@ def parse(data, config, path=None):
                     "The %s field should be a dict or list of dicts, not "
                     "%s in file %s." % (field, res[field].__class__.__name__, path)
                 )
-        else:
-            if not isinstance(res[field], dict):
-                raise RuntimeError(
-                    "The %s field should be a dict, not %s in file %s."
-                    % (field, res[field].__class__.__name__, path)
-                )
+        elif not isinstance(res[field], dict):
+            raise RuntimeError(
+                f"The {field} field should be a dict, not {res[field].__class__.__name__} in file {path}."
+            )
 
     ensure_valid_fields(res)
     ensure_valid_license_family(res)
@@ -629,8 +616,7 @@ def _git_clean(source_meta):
 
     has_rev_tags = tuple(bool(source_meta.get(tag, "")) for tag in git_rev_tags)
     if sum(has_rev_tags) > 1:
-        msg = "Error: multiple git_revs:"
-        msg += ", ".join(
+        msg = "Error: multiple git_revs:" + ", ".join(
             f"{key}" for key, has in zip(git_rev_tags, has_rev_tags) if has
         )
         sys.exit(msg)
@@ -677,64 +663,62 @@ def get_package_version_pin(build_reqs, name):
 
 def build_string_from_metadata(metadata):
     if metadata.meta.get("build", {}).get("string"):
-        build_str = metadata.get_value("build/string")
-    else:
-        res = []
-        build_or_host = "host" if metadata.is_cross else "build"
-        build_pkg_names = [ms.name for ms in metadata.ms_depends(build_or_host)]
-        build_deps = metadata.meta.get("requirements", {}).get(build_or_host, [])
-        # TODO: this is the bit that puts in strings like py27np111 in the filename.  It would be
-        #    nice to get rid of this, since the hash supercedes that functionally, but not clear
-        #    whether anyone's tools depend on this file naming right now.
-        for s, names, places in (
-            ("np", "numpy", 2),
-            ("py", "python", 2),
-            ("pl", "perl", 3),
-            ("lua", "lua", 2),
-            ("r", ("r", "r-base"), 2),
-            ("mro", "mro-base", 3),
-            ("mro", "mro-base_impl", 3),
-        ):
-            for ms in metadata.ms_depends("run"):
-                for name in ensure_list(names):
-                    if ms.name == name and name in build_pkg_names:
-                        # only append numpy when it is actually pinned
-                        if name == "numpy" and not metadata.numpy_xx:
-                            continue
-                        if metadata.noarch == name or (
-                            metadata.get_value("build/noarch_python")
-                            and name == "python"
-                        ):
-                            res.append(s)
-                        else:
-                            pkg_names = list(ensure_list(names))
-                            pkg_names.extend(
-                                [
-                                    _n.replace("-", "_")
-                                    for _n in ensure_list(names)
-                                    if "-" in _n
-                                ]
+        return metadata.get_value("build/string")
+    res = []
+    build_or_host = "host" if metadata.is_cross else "build"
+    build_pkg_names = [ms.name for ms in metadata.ms_depends(build_or_host)]
+    build_deps = metadata.meta.get("requirements", {}).get(build_or_host, [])
+    # TODO: this is the bit that puts in strings like py27np111 in the filename.  It would be
+    #    nice to get rid of this, since the hash supercedes that functionally, but not clear
+    #    whether anyone's tools depend on this file naming right now.
+    for s, names, places in (
+        ("np", "numpy", 2),
+        ("py", "python", 2),
+        ("pl", "perl", 3),
+        ("lua", "lua", 2),
+        ("r", ("r", "r-base"), 2),
+        ("mro", "mro-base", 3),
+        ("mro", "mro-base_impl", 3),
+    ):
+        for ms in metadata.ms_depends("run"):
+            for name in ensure_list(names):
+                if ms.name == name and name in build_pkg_names:
+                    # only append numpy when it is actually pinned
+                    if name == "numpy" and not metadata.numpy_xx:
+                        continue
+                    if metadata.noarch == name or (
+                        metadata.get_value("build/noarch_python")
+                        and name == "python"
+                    ):
+                        res.append(s)
+                    else:
+                        pkg_names = list(ensure_list(names))
+                        pkg_names.extend(
+                            [
+                                _n.replace("-", "_")
+                                for _n in ensure_list(names)
+                                if "-" in _n
+                            ]
+                        )
+                        for _n in pkg_names:
+                            variant_version = get_package_version_pin(
+                                build_deps, _n
+                            ) or metadata.config.variant.get(
+                                _n.replace("-", "_"), ""
                             )
-                            for _n in pkg_names:
-                                variant_version = get_package_version_pin(
-                                    build_deps, _n
-                                ) or metadata.config.variant.get(
-                                    _n.replace("-", "_"), ""
-                                )
-                                if variant_version:
-                                    break
-                            entry = "".join([s] + variant_version.split(".")[:places])
-                            if entry not in res:
-                                res.append(entry)
+                            if variant_version:
+                                break
+                        entry = "".join([s] + variant_version.split(".")[:places])
+                        if entry not in res:
+                            res.append(entry)
 
-        features = ensure_list(metadata.get_value("build/features", []))
-        if res:
-            res.append("_")
-        if features:
-            res.extend(("_".join(features), "_"))
-        res.append(str(metadata.build_number()))
-        build_str = "".join(res)
-    return build_str
+    features = ensure_list(metadata.get_value("build/features", []))
+    if res:
+        res.append("_")
+    if features:
+        res.extend(("_".join(features), "_"))
+    res.append(str(metadata.build_number()))
+    return "".join(res)
 
 
 # This really belongs in conda, and it is int conda.cli.common,
@@ -748,7 +732,7 @@ def _get_env_path(env_name_or_path):
                 break
     bootstrap_metadir = os.path.join(env_name_or_path, "conda-meta")
     if not os.path.isdir(bootstrap_metadir):
-        print("Bootstrap environment '%s' not found" % env_name_or_path)
+        print(f"Bootstrap environment '{env_name_or_path}' not found")
         sys.exit(1)
     return env_name_or_path
 
@@ -758,11 +742,10 @@ def _get_dependencies_from_environment(env_name_or_path):
     # construct build requirements that replicate the given bootstrap environment
     # and concatenate them to the build requirements from the recipe
     bootstrap_metadata = get_installed_packages(path)
-    bootstrap_requirements = []
-    for package, data in bootstrap_metadata.items():
-        bootstrap_requirements.append(
-            "{} {} {}".format(package, data["version"], data["build"])
-        )
+    bootstrap_requirements = [
+        f'{package} {data["version"]} {data["build"]}'
+        for package, data in bootstrap_metadata.items()
+    ]
     return {"requirements": {"build": bootstrap_requirements}}
 
 
@@ -783,8 +766,8 @@ def toposort(output_metadata_map):
         for output_d in output_metadata_map
         if output_d.get("type", "conda").startswith("conda")
     ]
-    topodict = dict()
-    order = dict()
+    topodict = {}
+    order = {}
     endorder = set()
 
     for idx, (output_d, output_m) in enumerate(output_metadata_map.items()):
@@ -842,8 +825,8 @@ def get_output_dicts_from_metadata(metadata, outputs=None):
         # make a metapackage for the top-level package if the top-level requirements
         #     mention a subpackage,
         # but only if a matching output name is not explicitly provided
-        if metadata.uses_subpackage and not any(
-            metadata.name() == out.get("name", "") for out in outputs
+        if metadata.uses_subpackage and all(
+            metadata.name() != out.get("name", "") for out in outputs
         ):
             outputs.append(OrderedDict(name=metadata.name()))
     for out in outputs:
@@ -928,23 +911,21 @@ def finalize_outputs_pass(
         except exceptions.DependencyNeedsBuildingError as e:
             if not permit_unsatisfiable_variants:
                 raise
-            else:
-                log = utils.get_logger(__name__)
-                log.warn(
-                    "Could not finalize metadata due to missing dependencies: "
-                    "{}".format(e.packages)
+            log = utils.get_logger(__name__)
+            log.warn(
+                f"Could not finalize metadata due to missing dependencies: {e.packages}"
+            )
+            outputs[
+                (
+                    metadata.name(),
+                    HashableDict(
+                        {
+                            k: copy.deepcopy(metadata.config.variant[k])
+                            for k in metadata.get_used_vars()
+                        }
+                    ),
                 )
-                outputs[
-                    (
-                        metadata.name(),
-                        HashableDict(
-                            {
-                                k: copy.deepcopy(metadata.config.variant[k])
-                                for k in metadata.get_used_vars()
-                            }
-                        ),
-                    )
-                ] = (output_d, metadata)
+            ] = (output_d, metadata)
     # in-place modification
     base_metadata.other_outputs = outputs
     base_metadata.final = False
@@ -1036,14 +1017,13 @@ def trim_build_only_deps(metadata, requirements_used):
                 and dep in requirements_used
             ):
                 to_remove.add(dep)
-        else:
-            if (
+        elif (
                 dep in build_reqs
                 and dep not in host_reqs
                 and dep in requirements_used
                 and dep in ignore_build_only_deps
             ):
-                to_remove.add(dep)
+            to_remove.add(dep)
 
     return requirements_used - to_remove
 
@@ -1089,7 +1069,7 @@ class MetaData:
 
         # Start with bare-minimum contents so we can call environ.get_dict() with impunity
         # We'll immediately replace these contents in parse_again()
-        self.meta = dict()
+        self.meta = {}
 
         # This is the 'first pass' parse of meta.yaml, so not all variables are defined yet
         # (e.g. GIT_FULL_HASH, etc. are undefined)
@@ -1286,8 +1266,7 @@ class MetaData:
                 bypass_env_check=bypass_env_check,
             )
             sys.exit(
-                "Undefined Jinja2 variables remain ({}).  Please enable "
-                "source downloading and try again.".format(self.undefined_jinja_vars)
+                f"Undefined Jinja2 variables remain ({self.undefined_jinja_vars}).  Please enable source downloading and try again."
             )
 
         # always parse again at the end, too.
@@ -1343,13 +1322,13 @@ class MetaData:
         :return: The named value from meta.yaml
         """
         names = name.split("/")
-        assert len(names) in (2, 3), "Bad field name: " + name
+        assert len(names) in {2, 3}, f"Bad field name: {name}"
         if len(names) == 2:
             section, key = names
             index = None
         elif len(names) == 3:
             section, index, key = names
-            assert section == "source", "Section is not a list: " + section
+            assert section == "source", f"Section is not a list: {section}"
             index = int(index)
 
         # get correct default
@@ -1403,7 +1382,7 @@ class MetaData:
             if section == "extra":
                 continue
             if section not in FIELDS:
-                raise ValueError("unknown section: %s" % section)
+                raise ValueError(f"unknown section: {section}")
             for key_or_dict in submeta:
                 if section in OPTIONALLY_ITERABLE_FIELDS and isinstance(
                     key_or_dict, dict
@@ -1450,17 +1429,16 @@ class MetaData:
             )
 
     def get_depends_top_and_out(self, typ):
-        meta_requirements = ensure_list(self.get_value("requirements/" + typ, []))[:]
+        meta_requirements = ensure_list(self.get_value(f"requirements/{typ}", []))[:]
         req_names = {req.split()[0] for req in meta_requirements if req}
         extra_reqs = []
         # this is for the edge case of requirements for top-level being also partially defined in a similarly named output
         if not self.is_output:
-            matching_output = [
+            if matching_output := [
                 out
                 for out in self.meta.get("outputs", [])
                 if out.get("name") == self.name()
-            ]
-            if matching_output:
+            ]:
                 extra_reqs = utils.expand_reqs(
                     matching_output[0].get("requirements", [])
                 ).get(typ, [])
@@ -1488,7 +1466,7 @@ class MetaData:
                 ]
             )
         specs = OrderedDict()
-        for spec in ensure_list(self.get_value("requirements/" + typ, [])):
+        for spec in ensure_list(self.get_value(f"requirements/{typ}", [])):
             if not spec:
                 continue
             try:
@@ -1503,7 +1481,7 @@ class MetaData:
             if ms.name == self.name() and not (
                 typ == "build" and self.config.host_subdir != self.config.build_subdir
             ):
-                raise RuntimeError("%s cannot depend on itself" % self.name())
+                raise RuntimeError(f"{self.name()} cannot depend on itself")
             for name, ver in name_ver_list:
                 if ms.name == name:
                     if self.noarch:
@@ -1523,9 +1501,7 @@ class MetaData:
                         "dependency '%s'" % (parts[1], ms.name)
                     )
                     if len(parts) >= 3:
-                        msg += "\nPerhaps you meant '{} {}{}'".format(
-                            ms.name, parts[1], parts[2]
-                        )
+                        msg += f"\nPerhaps you meant '{ms.name} {parts[1]}{parts[2]}'"
                     sys.exit(msg)
             specs[spec] = ms
         return list(specs.values())
@@ -1592,7 +1568,7 @@ class MetaData:
         virtual_pkgs = [req for req in run_reqs if req.startswith("__")]
 
         # add name -> match spec mapping for virtual packages
-        hash_contents.update({pkg.split(" ")[0]: pkg for pkg in virtual_pkgs})
+        hash_contents |= {pkg.split(" ")[0]: pkg for pkg in virtual_pkgs}
         return hash_contents
 
     def hash_dependencies(self):
@@ -1605,11 +1581,10 @@ class MetaData:
             rebuilds. We reduce the scope to include only the pins added by conda_build_config.yaml,
             and no longer hash files that contribute to the recipe.
         """
-        hash_ = ""
-        hashing_dependencies = self.get_hash_contents()
-        if hashing_dependencies:
+        if hashing_dependencies := self.get_hash_contents():
             return _hash_dependencies(hashing_dependencies, self.config.hash_length)
-        return hash_
+        else:
+            return ""
 
     def build_id(self):
         manual_build_string = self.get_value("build/string")
@@ -1651,7 +1626,7 @@ class MetaData:
         return f"{self.name()}-{self.version()}-{self.build_id()}"
 
     def pkg_fn(self):
-        return "%s.tar.bz2" % self.dist()
+        return f"{self.dist()}.tar.bz2"
 
     def is_app(self):
         return bool(self.get_value("app/entry"))
@@ -1659,7 +1634,7 @@ class MetaData:
     def app_meta(self):
         d = {"type": "app"}
         if self.get_value("app/icon"):
-            d["icon"] = "%s.png" % md5_file(join(self.path, self.get_value("app/icon")))
+            d["icon"] = f'{md5_file(join(self.path, self.get_value("app/icon")))}.png'
 
         for field, key in [
             ("app/entry", "app_entry"),
@@ -1668,8 +1643,7 @@ class MetaData:
             ("app/summary", "summary"),
             ("app/own_environment", "app_own_environment"),
         ]:
-            value = self.get_value(field)
-            if value:
+            if value := self.get_value(field):
                 d[key] = value
         return d
 
@@ -1691,19 +1665,15 @@ class MetaData:
             timestamp=int(time.time() * 1000),
         )
         for key in ("license", "license_family"):
-            value = self.get_value("about/" + key)
-            if value:
+            if value := self.get_value(f"about/{key}"):
                 d[key] = value
 
-        preferred_env = self.get_value("build/preferred_env")
-        if preferred_env:
+        if preferred_env := self.get_value("build/preferred_env"):
             d["preferred_env"] = preferred_env
 
         # conda 4.4+ optional dependencies
         constrains = ensure_list(self.get_value("requirements/run_constrained"))
-        # filter None values
-        constrains = [v for v in constrains if v]
-        if constrains:
+        if constrains := [v for v in constrains if v]:
             d["constrains"] = constrains
 
         if self.get_value("build/features"):
@@ -1717,13 +1687,10 @@ class MetaData:
         if self.noarch:
             d["platform"] = d["arch"] = None
             d["subdir"] = "noarch"
-            # These are new-style noarch settings.  the self.noarch setting can be True in 2 ways:
-            #    if noarch: True or if noarch_python: True.  This is disambiguation.
-            build_noarch = self.get_value("build/noarch")
-            if build_noarch:
+            if build_noarch := self.get_value("build/noarch"):
                 d["noarch"] = build_noarch
         if self.is_app():
-            d.update(self.app_meta())
+            d |= self.app_meta()
         return d
 
     def has_prefix_files(self):
@@ -1912,9 +1879,7 @@ class MetaData:
             if "'None' has not attribute" in str(ex):
                 ex = "Failed to run jinja context function"
             sys.exit(
-                "Error: Failed to render jinja template in {}:\n{}".format(
-                    self.meta_path, str(ex)
-                )
+                f"Error: Failed to render jinja template in {self.meta_path}:\n{str(ex)}"
             )
         finally:
             if "CONDA_BUILD_STATE" in os.environ:
@@ -2036,8 +2001,7 @@ class MetaData:
     def get_recipe_text(
         self, extract_pattern=None, force_top_level=False, apply_selectors=True
     ):
-        meta_path = self.meta_path
-        if meta_path:
+        if meta_path := self.meta_path:
             recipe_text = read_meta_file(meta_path)
             if self.is_output and not force_top_level:
                 recipe_text = self.extract_single_output_text(
@@ -2133,8 +2097,7 @@ class MetaData:
         """This is legacy syntax that we need to support for a while.  numpy x.x means
         "pin run as build" for numpy.  It was special-cased to only numpy."""
         text = self.extract_requirements_text()
-        uses_xx = bool(numpy_xx_re.search(text))
-        return uses_xx
+        return bool(numpy_xx_re.search(text))
 
     @property
     def uses_numpy_pin_compatible_without_xx(self):
@@ -2157,7 +2120,7 @@ class MetaData:
         in_reqs = False
         for out in outputs:
             if "name" in out:
-                name_re = re.compile(r"^{}(\s|\Z|$)".format(out["name"]))
+                name_re = re.compile(f'^{out["name"]}(\s|\Z|$)')
                 in_reqs = any(
                     name_re.match(req) for req in self.get_depends_top_and_out("run")
                 )
@@ -2165,8 +2128,7 @@ class MetaData:
                     break
         subpackage_pin = False
         if not in_reqs and self.meta_path:
-            data = self.extract_requirements_text(force_top_level=True)
-            if data:
+            if data := self.extract_requirements_text(force_top_level=True):
                 subpackage_pin = re.search(r"{{\s*pin_subpackage\(.*\)\s*}}", data)
         return in_reqs or bool(subpackage_pin)
 
@@ -2234,15 +2196,12 @@ class MetaData:
         vars_in_recipe = set(self.undefined_jinja_vars)
         self.config.variant = variant
 
-        for key in vars_in_recipe & set(variant.keys()):
-            # We use this variant in the top-level recipe.
-            # constrain the stored variants to only this version in the output
-            #     variant mapping
-            if re.search(
+        return any(
+            re.search(
                 r"\s*\{\{\s*%s\s*(?:.*?)?\}\}" % key, self.extract_source_text()
-            ):
-                return True
-        return False
+            )
+            for key in vars_in_recipe & set(variant.keys())
+        )
 
     @property
     def pin_depends(self):
@@ -2318,9 +2277,7 @@ class MetaData:
                 # since we are copying reqs from the top-level package, which
                 #   can depend on subpackages, make sure that we filter out
                 #   subpackages so that they don't depend on themselves
-                subpackage_pattern = re.compile(
-                    r"(?:^{}(?:\s|$|\Z))".format(output["name"])
-                )
+                subpackage_pattern = re.compile(f'(?:^{output["name"]}(?:\s|$|\Z))')
                 if build_reqs:
                     build_reqs = [
                         req for req in build_reqs if not subpackage_pattern.match(req)
@@ -2341,7 +2298,7 @@ class MetaData:
             requirements.update(
                 {"run_constrained": constrain_reqs}
             ) if constrain_reqs else None
-            requirements.update(other_reqs)
+            requirements |= other_reqs
             output_metadata.meta["requirements"] = requirements
 
             output_metadata.meta["package"]["version"] = (
@@ -2353,7 +2310,8 @@ class MetaData:
             # primarily for tests - make sure that we keep the platform consistent (setting noarch
             #      would reset it)
             if (
-                not (output_metadata.noarch or output_metadata.noarch_python)
+                not output_metadata.noarch
+                and not output_metadata.noarch_python
                 and self.config.platform != output_metadata.config.platform
             ):
                 output_metadata.config.platform = self.config.platform
@@ -2421,7 +2379,7 @@ class MetaData:
         reduce_keys = [
             key
             for key in reduce_keys
-            if not any(key in group for group in used_zip_key_groups)
+            if all(key not in group for group in used_zip_key_groups)
             and key not in extend_keys
         ]
         for key in reduce_keys:
@@ -2435,8 +2393,7 @@ class MetaData:
                 # save only one element from this key
                 reduced_collapsed_variants[key] = utils.ensure_list(next(iter(values)))
 
-        out = variants.dict_of_lists_to_list_of_dicts(reduced_collapsed_variants)
-        return out
+        return variants.dict_of_lists_to_list_of_dicts(reduced_collapsed_variants)
 
     def get_output_metadata_set(
         self,
@@ -2449,7 +2406,7 @@ class MetaData:
         out_metadata_map = {}
         if self.final:
             outputs = get_output_dicts_from_metadata(self)[0]
-            output_tuples = [(outputs, self)]
+            return [(outputs, self)]
         else:
             all_output_metadata = OrderedDict()
 
@@ -2470,18 +2427,15 @@ class MetaData:
                     utils.rm_rf(ref_metadata.config.work_dir)
                     provide(ref_metadata)
                     ref_metadata.parse_again()
-                try:
+                with contextlib.suppress(SystemExit):
                     ref_metadata.parse_until_resolved(
                         allow_no_other_outputs=True, bypass_env_check=True
                     )
-                except SystemExit:
-                    pass
                 outputs = get_output_dicts_from_metadata(ref_metadata)
 
                 try:
                     for out in outputs:
-                        requirements = out.get("requirements")
-                        if requirements:
+                        if requirements := out.get("requirements"):
                             requirements = utils.expand_reqs(requirements)
                             for env in ("build", "host", "run"):
                                 insert_variant_versions(requirements, variant, env)
@@ -2539,13 +2493,12 @@ class MetaData:
                         ),
                     ] = (output_d, m)
                 elif output_d.get("type") == "wheel":
-                    if not output_d.get("requirements", {}).get("build") or not any(
-                        "pip" in req for req in output_d["requirements"]["build"]
+                    if not output_d.get("requirements", {}).get("build") or all(
+                        "pip" not in req
+                        for req in output_d["requirements"]["build"]
                     ):
                         build_reqs = output_d.get("requirements", {}).get("build", [])
-                        build_reqs.extend(
-                            ["pip", "python {}".format(m.config.variant["python"])]
-                        )
+                        build_reqs.extend(["pip", f'python {m.config.variant["python"]}'])
                         output_d["requirements"] = output_d.get("requirements", {})
                         output_d["requirements"]["build"] = build_reqs
                         m.meta["requirements"] = m.meta.get("requirements", {})
@@ -2582,8 +2535,7 @@ class MetaData:
                 #    barf if anyone tries to actually build it.
                 m.final = True
                 final_conda_packages.append((out_d, m))
-            output_tuples = final_conda_packages + non_conda_packages
-        return output_tuples
+            return final_conda_packages + non_conda_packages
 
     def get_loop_vars(self):
         _variants = (
@@ -2652,14 +2604,16 @@ class MetaData:
         output. It's not useful for saying what variables are used. You need earlier, more raw
         versions of the metadata for that. It is useful, however, for getting updated, re-rendered
         contents of outputs."""
-        output = None
-        for output_ in self.get_rendered_outputs_section(
-            permit_undefined_jinja=permit_undefined_jinja, variant=variant
-        ):
-            if output_.get("name") == name:
-                output = output_
-                break
-        return output
+        return next(
+            (
+                output_
+                for output_ in self.get_rendered_outputs_section(
+                    permit_undefined_jinja=permit_undefined_jinja, variant=variant
+                )
+                if output_.get("name") == name
+            ),
+            None,
+        )
 
     @property
     def force_ignore_keys(self):
@@ -2795,20 +2749,15 @@ class MetaData:
 
         all_used = all_used_reqs.union(all_used_selectors)
 
-        # things that are only used in requirements need further consideration,
-        #   for omitting things that are only used in run
         if force_global:
-            used = all_used
-        else:
-            requirements_used = variants.find_used_variables_in_text(
-                variant_keys, reqs_text
-            )
-            outside_reqs_used = all_used - requirements_used
+            return all_used
+        requirements_used = variants.find_used_variables_in_text(
+            variant_keys, reqs_text
+        )
+        outside_reqs_used = all_used - requirements_used
 
-            requirements_used = trim_build_only_deps(self, requirements_used)
-            used = outside_reqs_used | requirements_used
-
-        return used
+        requirements_used = trim_build_only_deps(self, requirements_used)
+        return outside_reqs_used | requirements_used
 
     def _get_used_vars_build_scripts(self):
         used_vars = set()
@@ -2850,8 +2799,7 @@ class MetaData:
             else:
                 log = utils.get_logger(__name__)
                 log.warn(
-                    "Not detecting used variables in output script {}; conda-build only knows "
-                    "how to search .sh and .bat files right now.".format(script)
+                    f"Not detecting used variables in output script {script}; conda-build only knows how to search .sh and .bat files right now."
                 )
         return used_vars
 
@@ -2919,7 +2867,9 @@ class MetaData:
         if lua_files:
             # not sure how this shakes out
             specs += ["lua"]
-        if r_files and not any(s.split()[0] in ("r-base", "mro-base") for s in specs):
+        if r_files and all(
+            s.split()[0] not in ("r-base", "mro-base") for s in specs
+        ):
             # not sure how this shakes out
             specs += ["r-base"]
 

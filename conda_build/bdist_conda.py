@@ -174,9 +174,7 @@ class bdist_conda(install):
         d["about"]["license"] = metadata.license
         d["about"]["summary"] = metadata.description
 
-        # This is similar logic from conda skeleton pypi
-        entry_points = getattr(self.distribution, "entry_points", [])
-        if entry_points:
+        if entry_points := getattr(self.distribution, "entry_points", []):
             if isinstance(entry_points, str):
                 # makes sure it is left-shifted
                 newstr = "\n".join(x.strip() for x in entry_points.splitlines())
@@ -187,8 +185,7 @@ class bdist_conda(install):
                 except Exception as err:
                     # This seems to be the best error here
                     raise GetoptError(
-                        "ERROR: entry-points not understood: "
-                        + str(err)
+                        f"ERROR: entry-points not understood: {str(err)}"
                         + "\nThe string was"
                         + newstr
                     )
@@ -208,24 +205,23 @@ class bdist_conda(install):
                 raise GetoptError(
                     "ERROR: Could not add entry points. They were:\n" + entry_points
                 )
-            else:
-                rs = entry_points.get("scripts", [])
-                cs = entry_points.get("console_scripts", [])
-                gs = entry_points.get("gui_scripts", [])
-                # We have *other* kinds of entry-points so we need
-                # setuptools at run-time
-                if not rs and not cs and not gs and len(entry_points) > 1:
-                    d["requirements"]["run"].append("setuptools")
-                    d["requirements"]["build"].append("setuptools")
-                entry_list = rs + cs + gs
-                if gs and self.config.platform == "osx":
-                    d["build"]["osx_is_app"] = True
-                if len(cs + gs) != 0:
-                    d["build"]["entry_points"] = entry_list
-                    if metadata.conda_command_tests is True:
-                        d["test"]["commands"] = list(
-                            map(str, pypi.make_entry_tests(entry_list))
-                        )
+            rs = entry_points.get("scripts", [])
+            cs = entry_points.get("console_scripts", [])
+            gs = entry_points.get("gui_scripts", [])
+            # We have *other* kinds of entry-points so we need
+            # setuptools at run-time
+            if not rs and not cs and not gs and len(entry_points) > 1:
+                d["requirements"]["run"].append("setuptools")
+                d["requirements"]["build"].append("setuptools")
+            entry_list = rs + cs + gs
+            if gs and self.config.platform == "osx":
+                d["build"]["osx_is_app"] = True
+            if len(cs + gs) != 0:
+                d["build"]["entry_points"] = entry_list
+                if metadata.conda_command_tests is True:
+                    d["test"]["commands"] = list(
+                        map(str, pypi.make_entry_tests(entry_list))
+                    )
 
         if "setuptools" in d["requirements"]["run"]:
             d["build"]["preserve_egg_dir"] = True
